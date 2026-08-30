@@ -203,114 +203,11 @@
   }
 
   function renderPreview(md) {
-    els.previewPane.innerHTML = mdToHtml(md);
-  }
-
-  // Minimal markdown renderer — headings, bold/italic, code, links, lists, tables, blockquotes.
-  function mdToHtml(src) {
     // Strip frontmatter block for preview.
-    src = src.replace(/^---\n[\s\S]*?\n---\n?/, '');
-    const lines = src.split('\n');
-    let html = '';
-    let inCode = false;
-    let listType = null;
-    let inTable = false;
-    let tableRows = [];
-
-    function closeList() {
-      if (listType) {
-        html += listType === 'ul' ? '</ul>' : '</ol>';
-        listType = null;
-      }
-    }
-    function flushTable() {
-      if (!tableRows.length) return;
-      const [headerRow, sepRow, ...bodyRows] = tableRows;
-      html += '<table><thead><tr>' + headerRow.map((h) => `<th>${inline(h)}</th>`).join('') + '</tr></thead><tbody>';
-      bodyRows.forEach((r) => {
-        html += '<tr>' + r.map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>';
-      });
-      html += '</tbody></table>';
-      tableRows = [];
-      inTable = false;
-    }
-
-    for (const line of lines) {
-      if (line.trim().startsWith('```')) {
-        if (!inCode) {
-          closeList();
-          html += '<pre><code>';
-          inCode = true;
-        } else {
-          html += '</code></pre>';
-          inCode = false;
-        }
-        continue;
-      }
-      if (inCode) {
-        html += escapeHtml(line) + '\n';
-        continue;
-      }
-      if (/^\s*\|(.+)\|\s*$/.test(line)) {
-        inTable = true;
-        const cells = line.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
-        tableRows.push(cells);
-        continue;
-      } else if (inTable) {
-        flushTable();
-      }
-      const h = line.match(/^(#{1,6})\s+(.*)$/);
-      if (h) {
-        closeList();
-        const level = h[1].length;
-        html += `<h${level}>${inline(h[2])}</h${level}>`;
-        continue;
-      }
-      const bq = line.match(/^>\s?(.*)$/);
-      if (bq) {
-        html += `<blockquote>${inline(bq[1])}</blockquote>`;
-        continue;
-      }
-      const ul = line.match(/^\s*[-*]\s+(.*)$/);
-      const ol = line.match(/^\s*\d+\.\s+(.*)$/);
-      if (ul) {
-        if (listType !== 'ul') {
-          closeList();
-          html += '<ul>';
-          listType = 'ul';
-        }
-        html += `<li>${inline(ul[1])}</li>`;
-        continue;
-      }
-      if (ol) {
-        if (listType !== 'ol') {
-          closeList();
-          html += '<ol>';
-          listType = 'ol';
-        }
-        html += `<li>${inline(ol[1])}</li>`;
-        continue;
-      }
-      closeList();
-      if (line.trim() === '') {
-        html += '';
-      } else {
-        html += `<p>${inline(line)}</p>`;
-      }
-    }
-    closeList();
-    flushTable();
-    if (inCode) html += '</code></pre>';
-    return html;
-  }
-
-  function inline(text) {
-    let t = escapeHtml(text);
-    t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
-    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-    return t;
+    const body = md.replace(/^---\n[\s\S]*?\n---\n?/, '');
+    const rawHtml = marked.parse(body, { gfm: true, breaks: false });
+    els.previewPane.innerHTML = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target'] });
+    wireInternalLinks();
   }
 
   function escapeHtml(s) {
@@ -318,6 +215,103 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  }
+
+  // --- Internal link resolution: relative .md links in preview open inside
+  // the app (switch card/file) instead of doing a full page navigation. ---
+
+  function currentDir() {
+    const c = state.selected;
+    const full = `${c.baseDir}/${state.activeFile}`;
+    const parts = full.split('/');
+    parts.pop();
+    return parts.join('/');
+  }
+
+  function resolveRelative(baseDir, rel) {
+    if (/^\//.test(rel)) return rel.replace(/^\/+/, '');
+    const stack = baseDir ? baseDir.split('/').filter(Boolean) : [];
+    for (const part of rel.split('/')) {
+      if (part === '' || part === '.') continue;
+      if (part === '..') stack.pop();
+      else stack.push(part);
+    }
+    return stack.join('/');
+  }
+
+  function findCardForPath(resolvedPath) {
+    for (const c of state.cards) {
+      const candidates = c.files && c.files.length ? c.files : [c.mainFile];
+      for (const f of candidates) {
+        if (`${c.baseDir}/${f}` === resolvedPath) return { card: c, file: f };
+      }
+    }
+    return null;
+  }
+
+  function wireInternalLinks() {
+    const anchors = els.previewPane.querySelectorAll('a[href]');
+    anchors.forEach((a) => {
+      const href = a.getAttribute('href');
+      if (!href || /^([a-z]+:)?\/\//i.test(href) || href.startsWith('mailto:') || href.startsWith('#')) {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener');
+        return;
+      }
+      const withoutAnchor = href.split('#')[0];
+      if (!withoutAnchor) return; // pure in-page anchor, leave as-is
+      const resolved = resolveRelative(currentDir(), withoutAnchor);
+      a.setAttribute('href', '/' + resolved);
+      a.dataset.internal = resolved;
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        navigateInternal(resolved);
+      });
+    });
+  }
+
+  async function navigateInternal(resolvedPath) {
+    if (state.dirty && !confirm('Есть несохранённые изменения. Продолжить без сохранения?')) return;
+    const match = findCardForPath(resolvedPath);
+    if (match) {
+      state.selected = match.card;
+      state.activeFile = match.file;
+      state.dirty = false;
+      renderList();
+      renderHeader();
+      renderFileTabs();
+      await loadFile(match.file);
+      return;
+    }
+    // Fallback: a real repo file not tied to any indexed card (e.g. schema/, CLAUDE.md).
+    const segments = resolvedPath.split('/');
+    const fileName = segments.pop();
+    const baseDir = segments.join('/');
+    if (!/\.md$/i.test(fileName)) {
+      console.warn('Ссылка ведёт не на markdown-файл, пропускаю навигацию:', resolvedPath);
+      return;
+    }
+    state.selected = {
+      title: fileName,
+      path: resolvedPath,
+      baseDir,
+      mainFile: fileName,
+      files: [fileName],
+      root: '',
+      type: 'file',
+      status: '',
+      stack: [],
+      tags: [],
+      owner: '',
+      updated: '',
+      links: {},
+    };
+    state.activeFile = fileName;
+    state.dirty = false;
+    renderList();
+    renderHeader();
+    renderFileTabs();
+    await loadFile(fileName);
   }
 
   els.search.addEventListener('input', (e) => {
