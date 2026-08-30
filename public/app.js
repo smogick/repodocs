@@ -216,6 +216,16 @@
       els.saveStatus.textContent = 'сохранено ✓';
       if (state.activeFile === c.mainFile) {
         await loadCards();
+        // loadCards() replaces state.cards with fresh objects; re-point
+        // state.selected at the matching fresh one and re-render the
+        // header/frontmatter bar so edited fields show up immediately,
+        // without needing to reselect the card or reload the page.
+        const refreshed = state.cards.find((x) => x.path === c.path);
+        if (refreshed) {
+          state.selected = refreshed;
+          renderHeader();
+          renderFileTabs();
+        }
       }
     } catch (err) {
       els.saveStatus.textContent = 'ошибка: ' + (err.message || err);
