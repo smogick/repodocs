@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<title>repodocs</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h1>repodocs</h1>
+      <input id="search" type="text" placeholder="Поиск по названию, summary, тегам..." />
+      <div id="filters"></div>
+    </div>
+    <div id="card-list"></div>
+  </div>
+  <div id="main">
+    <div id="main-header"><div id="empty-header"></div></div>
+    <div id="frontmatter-bar"></div>
+    <div id="file-tabs"></div>
+    <div id="editor-area">
+      <div id="editor-toolbar" style="display:none">
+        <button id="save-btn" class="primary">Сохранить</button>
+        <button id="reindex-btn">Пересобрать INDEX.md</button>
+        <span id="save-status"></span>
+      </div>
+      <div id="content-panes">
+        <div id="raw-pane"><div id="empty-state">Выбери карточку слева</div></div>
+        <div id="preview-pane"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

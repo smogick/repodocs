@@ -1,0 +1,14 @@
+{
+  "name": "repodocs-ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "build-index": "node scripts/build-index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "gray-matter": "^4.0.3"
+  }
+}
