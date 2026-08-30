@@ -171,10 +171,30 @@
       renderPreview(data.content);
       els.saveStatus.textContent = '';
       state.dirty = false;
+      setupSyncScroll(ta, els.previewPane);
     } catch (err) {
       els.rawPane.innerHTML = `<div id="empty-state">Ошибка: ${escapeHtml(String(err.message || err))}</div>`;
       els.previewPane.innerHTML = '';
     }
+  }
+
+  // Keep the raw editor and rendered preview scrolled to roughly the same
+  // position (by scroll percentage, since the two don't share line numbers).
+  function setupSyncScroll(source, target) {
+    let syncing = false;
+    function sync(from, to) {
+      if (syncing) return;
+      syncing = true;
+      const range = from.scrollHeight - from.clientHeight;
+      const ratio = range > 0 ? from.scrollTop / range : 0;
+      const targetRange = to.scrollHeight - to.clientHeight;
+      to.scrollTop = ratio * targetRange;
+      requestAnimationFrame(() => {
+        syncing = false;
+      });
+    }
+    source.addEventListener('scroll', () => sync(source, target));
+    target.addEventListener('scroll', () => sync(target, source));
   }
 
   async function saveCurrent() {
