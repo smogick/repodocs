@@ -87,11 +87,40 @@ body {
   padding: 6px;
 }
 
+.section-header {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 12px 10px 6px;
+}
+.section-header:first-child { padding-top: 6px; }
+
 .card-item {
   padding: 10px 10px;
   border-radius: 8px;
   cursor: pointer;
   margin-bottom: 3px;
+}
+
+.card-matches {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.match-file {
+  font-size: 10.5px;
+  font-family: "SF Mono", Menlo, monospace;
+  color: var(--accent);
+  margin-top: 4px;
+  cursor: pointer;
+}
+.match-file:hover { text-decoration: underline; }
+.match-snippet {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .card-item:hover { background: var(--panel-2); }

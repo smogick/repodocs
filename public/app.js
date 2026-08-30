@@ -4,10 +4,15 @@
     filterRoot: null,
     filterStatus: null,
     query: '',
+    contentMatches: null, // null = no full-text search active; else Map(cardPath -> [{file, snippets}])
+    searchSeq: 0, // guards against out-of-order async search responses
     selected: null, // card object
     activeFile: null, // relative file path within card dir, e.g. 'README.md'
     dirty: false,
   };
+
+  const ROOT_ORDER = ['projects', 'areas', 'resources', 'archive'];
+  let searchDebounce = null;
 
   const els = {
     search: document.getElementById('search'),
@@ -61,7 +66,7 @@
     });
   }
 
-  function matchesQuery(card, q) {
+  function matchesMetadata(card, q) {
     if (!q) return true;
     const hay = [card.title, card.summary, (card.tags || []).join(' '), (card.stack || []).join(' '), card.slug]
       .join(' ')
@@ -69,40 +74,103 @@
     return hay.includes(q.toLowerCase());
   }
 
+  // Debounced full-text search across file contents (not just metadata).
+  // Runs alongside the instant metadata filter so the list responds
+  // immediately while content results fill in a moment later.
+  function scheduleContentSearch(q) {
+    clearTimeout(searchDebounce);
+    if (!q || q.trim().length < 2) {
+      state.contentMatches = null;
+      renderList();
+      return;
+    }
+    searchDebounce = setTimeout(async () => {
+      const seq = ++state.searchSeq;
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (seq !== state.searchSeq) return; // a newer search superseded this one
+        const map = new Map();
+        (data || []).forEach((r) => map.set(r.path, r.files));
+        state.contentMatches = map;
+        renderList();
+      } catch (err) {
+        // silently ignore — metadata filter still works without full-text search
+      }
+    }, 250);
+  }
+
   function renderList() {
-    const filtered = state.cards.filter(
-      (c) =>
-        (!state.filterRoot || c.root === state.filterRoot) &&
-        (!state.filterStatus || c.status === state.filterStatus) &&
-        matchesQuery(c, state.query)
-    );
+    const q = state.query.trim();
+    const visibleByRoot = ROOT_ORDER.map((root) => {
+      const cards = state.cards.filter((c) => {
+        if (c.root !== root) return false;
+        if (state.filterRoot && c.root !== state.filterRoot) return false;
+        if (state.filterStatus && c.status !== state.filterStatus) return false;
+        if (!q) return true;
+        const metaMatch = matchesMetadata(c, q);
+        const contentMatch = state.contentMatches && state.contentMatches.has(c.path);
+        return metaMatch || contentMatch;
+      });
+      return { root, cards };
+    }).filter((g) => g.cards.length > 0);
+
     els.cardList.innerHTML = '';
-    if (filtered.length === 0) {
+    if (visibleByRoot.length === 0) {
       const empty = document.createElement('div');
       empty.id = 'empty-state';
       empty.textContent = 'Ничего не найдено';
       els.cardList.appendChild(empty);
       return;
     }
-    filtered.forEach((card) => {
-      const item = document.createElement('div');
-      item.className = 'card-item' + (state.selected && state.selected.path === card.path ? ' selected' : '');
-      item.innerHTML = `
-        <div class="row1">
-          <div class="card-title"><span class="status-dot status-${card.status}"></span>${escapeHtml(card.title)}</div>
-        </div>
-        <div class="card-summary">${escapeHtml(card.summary || '')}</div>
-        <div class="card-meta"><span class="type-badge">${card.type}</span>${(card.stack || []).join(', ')}</div>
-      `;
-      item.onclick = () => selectCard(card);
-      els.cardList.appendChild(item);
+    visibleByRoot.forEach(({ root, cards }) => {
+      const section = document.createElement('div');
+      section.className = 'section-header';
+      section.textContent = `${ROOT_LABELS[root] || root} · ${cards.length}`;
+      els.cardList.appendChild(section);
+      cards.forEach((card) => {
+        const item = document.createElement('div');
+        item.className = 'card-item' + (state.selected && state.selected.path === card.path ? ' selected' : '');
+        const snippetsHtml = renderSnippetsFor(card);
+        item.innerHTML = `
+          <div class="row1">
+            <div class="card-title"><span class="status-dot status-${card.status}"></span>${escapeHtml(card.title)}</div>
+          </div>
+          <div class="card-summary">${escapeHtml(card.summary || '')}</div>
+          <div class="card-meta"><span class="type-badge">${card.type}</span>${(card.stack || []).join(', ')}</div>
+          ${snippetsHtml}
+        `;
+        item.addEventListener('click', (e) => {
+          const matchTarget = e.target.closest('.match-file');
+          if (matchTarget) {
+            e.stopPropagation();
+            selectCard(card, matchTarget.dataset.file);
+          } else {
+            selectCard(card);
+          }
+        });
+        els.cardList.appendChild(item);
+      });
     });
   }
 
-  async function selectCard(card) {
+  function renderSnippetsFor(card) {
+    if (!state.contentMatches || !state.contentMatches.has(card.path)) return '';
+    const files = state.contentMatches.get(card.path);
+    const rows = files
+      .slice(0, 3)
+      .map((f) => {
+        const snippet = (f.snippets && f.snippets[0]) || '';
+        return `<div class="match-file" data-file="${escapeHtml(f.file)}">${escapeHtml(f.file)}</div><div class="match-snippet">…${escapeHtml(snippet)}…</div>`;
+      })
+      .join('');
+    return `<div class="card-matches">${rows}</div>`;
+  }
+
+  async function selectCard(card, preferredFile) {
     if (state.dirty && !confirm('Есть несохранённые изменения. Продолжить без сохранения?')) return;
     state.selected = card;
-    state.activeFile = card.mainFile || 'README.md';
+    state.activeFile = preferredFile || card.mainFile || 'README.md';
     state.dirty = false;
     renderList();
     renderHeader();
@@ -347,6 +415,7 @@
   els.search.addEventListener('input', (e) => {
     state.query = e.target.value;
     renderList();
+    scheduleContentSearch(state.query);
   });
 
   els.saveBtn.addEventListener('click', saveCurrent);
