@@ -27,6 +27,7 @@
     saveBtn: document.getElementById('save-btn'),
     reindexBtn: document.getElementById('reindex-btn'),
     saveStatus: document.getElementById('save-status'),
+    themeToggle: document.getElementById('theme-toggle'),
   };
 
   const ROOT_LABELS = { projects: 'Проекты', areas: 'Области', resources: 'Ресурсы', archive: 'Архив' };
@@ -433,5 +434,23 @@
     }
   });
 
+  function initTheme() {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    els.themeToggle.textContent = isLight ? '☀️' : '🌙';
+    els.themeToggle.addEventListener('click', () => {
+      const nowLight = document.documentElement.getAttribute('data-theme') !== 'light';
+      if (nowLight) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+      els.themeToggle.textContent = nowLight ? '☀️' : '🌙';
+      try {
+        localStorage.setItem('repodocs-theme', nowLight ? 'light' : 'dark');
+      } catch (e) {}
+    });
+  }
+
+  initTheme();
   loadCards();
 })();
