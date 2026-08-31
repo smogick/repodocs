@@ -23,7 +23,7 @@
     cardList: document.getElementById('card-list'),
     mainHeader: document.getElementById('main-header'),
     frontmatterBar: document.getElementById('frontmatter-bar'),
-    fileTabs: document.getElementById('file-tabs'),
+    fileTree: document.getElementById("file-tree"),
     editorToolbar: document.getElementById('editor-toolbar'),
     rawPane: document.getElementById('raw-pane'),
     previewPane: document.getElementById('preview-pane'),
@@ -263,7 +263,7 @@
       state.selected = null;
       state.activeFile = null;
       renderHeader();
-      renderFileTabs();
+      renderFileTree();
       els.editorToolbar.style.display = 'none';
       els.rawPane.innerHTML = '<div id="empty-state">Выбери карточку слева</div>';
       els.previewPane.innerHTML = '';
@@ -280,7 +280,7 @@
     state.dirty = false;
     renderList();
     renderHeader();
-    renderFileTabs();
+    renderFileTree();
     await loadFile(state.activeFile);
   }
 
@@ -312,22 +312,77 @@
     `;
   }
 
-  function renderFileTabs() {
-    const c = state.selected;
-    els.fileTabs.innerHTML = '';
-    if (!c) return;
-    const files = c.files.length ? c.files : ['README.md'];
+  // Folder paths currently collapsed, per card (cardPath -> Set<folderPath>).
+  // Folders default to expanded — nothing here until the user collapses one.
+  const collapsedFolders = new Map();
+
+  function buildFileTree(files) {
+    const root = { type: 'dir', children: new Map() };
     files.forEach((f) => {
-      const tab = document.createElement('div');
-      tab.className = 'file-tab' + (state.activeFile === f ? ' active' : '');
-      tab.textContent = f;
-      tab.onclick = async () => {
+      const parts = f.split('/');
+      let node = root;
+      parts.forEach((part, i) => {
+        if (i === parts.length - 1) {
+          node.children.set(part, { type: 'file', name: part, path: f });
+        } else {
+          if (!node.children.has(part)) node.children.set(part, { type: 'dir', name: part, children: new Map() });
+          node = node.children.get(part);
+        }
+      });
+    });
+    return root;
+  }
+
+  function renderFileTree() {
+    els.fileTree.innerHTML = '';
+    const c = state.selected;
+    if (!c) {
+      els.fileTree.innerHTML = '<div class="tree-empty">Выбери карточку слева</div>';
+      return;
+    }
+    const files = c.files && c.files.length ? c.files : [c.mainFile || 'README.md'];
+    const tree = buildFileTree(files);
+    const collapsed = collapsedFolders.get(c.path) || new Set();
+    const container = document.createElement('div');
+    renderTreeLevel(tree, container, 0, '', collapsed);
+    els.fileTree.appendChild(container);
+  }
+
+  function renderTreeLevel(node, container, depth, pathPrefix, collapsed) {
+    const entries = Array.from(node.children.values());
+    const dirs = entries.filter((n) => n.type === 'dir').sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    const filesArr = entries.filter((n) => n.type === 'file').sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
+    dirs.forEach((dir) => {
+      const folderPath = pathPrefix ? `${pathPrefix}/${dir.name}` : dir.name;
+      const isCollapsed = collapsed.has(folderPath);
+      const row = document.createElement('div');
+      row.className = 'tree-row tree-folder';
+      row.style.paddingLeft = `${8 + depth * 14}px`;
+      row.innerHTML = `${window.icon(isCollapsed ? 'chevron-right' : 'chevron-down', 12)}${window.icon('folder', 13)}<span>${escapeHtml(dir.name)}</span>`;
+      row.addEventListener('click', () => {
+        if (isCollapsed) collapsed.delete(folderPath);
+        else collapsed.add(folderPath);
+        collapsedFolders.set(state.selected.path, collapsed);
+        renderFileTree();
+      });
+      container.appendChild(row);
+      if (!isCollapsed) renderTreeLevel(dir, container, depth + 1, folderPath, collapsed);
+    });
+
+    filesArr.forEach((file) => {
+      const row = document.createElement('div');
+      row.className = 'tree-row tree-file' + (state.activeFile === file.path ? ' active' : '');
+      row.style.paddingLeft = `${8 + depth * 14 + 17}px`;
+      row.innerHTML = `${window.icon('file-text', 12)}<span>${escapeHtml(file.name)}</span>`;
+      row.addEventListener('click', async () => {
+        if (state.activeFile === file.path) return;
         if (state.dirty && !confirm('Есть несохранённые изменения. Продолжить без сохранения?')) return;
-        state.activeFile = f;
-        renderFileTabs();
-        await loadFile(f);
-      };
-      els.fileTabs.appendChild(tab);
+        state.activeFile = file.path;
+        renderFileTree();
+        await loadFile(file.path);
+      });
+      container.appendChild(row);
     });
   }
 
@@ -410,7 +465,7 @@
         if (refreshed) {
           state.selected = refreshed;
           renderHeader();
-          renderFileTabs();
+          renderFileTree();
         }
       }
     } catch (err) {
@@ -525,7 +580,7 @@
     state.dirty = false;
     renderList();
     renderHeader();
-    renderFileTabs();
+    renderFileTree();
     await loadFile(match.file);
   }
 
@@ -569,7 +624,7 @@
       state.dirty = false;
       renderList();
       renderHeader();
-      renderFileTabs();
+      renderFileTree();
       await loadFile(match.file);
       return;
     }
@@ -600,7 +655,7 @@
     state.dirty = false;
     renderList();
     renderHeader();
-    renderFileTabs();
+    renderFileTree();
     await loadFile(fileName);
   }
 
@@ -632,7 +687,7 @@
       state.activeFile = null;
       state.dirty = false;
       renderHeader();
-      renderFileTabs();
+      renderFileTree();
       els.editorToolbar.style.display = 'none';
       els.rawPane.innerHTML = '<div id="empty-state">Выбери карточку слева</div>';
       els.previewPane.innerHTML = '';
