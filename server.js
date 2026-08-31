@@ -3,6 +3,7 @@ const fs = require('fs');
 const express = require('express');
 const matter = require('gray-matter');
 const { REPO_ROOT, scanAll, resolveSafePath } = require('./lib/scan');
+const trash = require('./lib/trash');
 
 const app = express();
 const PORT = process.env.PORT || 4173;
@@ -91,6 +92,48 @@ app.get('/api/search', (req, res) => {
   }
 });
 
+app.delete('/api/entity', (req, res) => {
+  try {
+    const p = req.query.path;
+    if (!p) return res.status(400).json({ error: 'path required' });
+    const meta = trash.softDelete(String(p));
+    res.json({ ok: true, trash: meta });
+  } catch (err) {
+    if (err.code === 'NOT_FOUND') return res.status(404).json({ error: 'not found' });
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.get('/api/trash', (req, res) => {
+  try {
+    res.json({ retentionDays: trash.RETENTION_DAYS, items: trash.listTrash() });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.post('/api/trash/:id/restore', (req, res) => {
+  try {
+    const meta = trash.restore(req.params.id);
+    res.json({ ok: true, restored: meta });
+  } catch (err) {
+    if (err.code === 'NOT_FOUND') return res.status(404).json({ error: 'not found' });
+    if (err.code === 'CONFLICT') {
+      return res.status(409).json({ error: 'по этому пути уже что-то есть — переименуйте или удалите текущее, затем восстановите' });
+    }
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.delete('/api/trash/:id', (req, res) => {
+  try {
+    trash.permanentlyDelete(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
 app.post('/api/reindex', (req, res) => {
   try {
     delete require.cache[require.resolve('./scripts/build-index.js')];
@@ -100,6 +143,8 @@ app.post('/api/reindex', (req, res) => {
     res.status(500).json({ error: String(err.message || err) });
   }
 });
+
+trash.purgeExpired();
 
 app.listen(PORT, () => {
   console.log(`repodocs UI: http://localhost:${PORT}`);

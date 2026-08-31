@@ -10,6 +10,8 @@
     activeFile: null, // relative file path within card dir, e.g. 'README.md'
     originalContent: '', // content as last loaded/saved, for real change detection
     dirty: false,
+    viewMode: 'cards', // 'cards' | 'trash'
+    trashItems: [],
   };
 
   const ROOT_ORDER = ['projects', 'areas', 'resources', 'archive'];
@@ -27,8 +29,10 @@
     previewPane: document.getElementById('preview-pane'),
     saveBtn: document.getElementById('save-btn'),
     reindexBtn: document.getElementById('reindex-btn'),
+    deleteBtn: document.getElementById('delete-btn'),
     saveStatus: document.getElementById('save-status'),
     themeToggle: document.getElementById('theme-toggle'),
+    trashToggle: document.getElementById('trash-toggle'),
   };
 
   const ROOT_LABELS = { projects: 'Проекты', areas: 'Области', resources: 'Ресурсы', archive: 'Архив' };
@@ -104,6 +108,10 @@
   }
 
   function renderList() {
+    if (state.viewMode === 'trash') {
+      renderTrashList();
+      return;
+    }
     const q = state.query.trim();
     const visibleByRoot = ROOT_ORDER.map((root) => {
       const cards = state.cards.filter((c) => {
@@ -168,6 +176,101 @@
       })
       .join('');
     return `<div class="card-matches">${rows}</div>`;
+  }
+
+  async function loadTrash() {
+    const res = await fetch('/api/trash');
+    const data = await res.json();
+    state.trashItems = data.items || [];
+  }
+
+  function renderTrashList() {
+    els.cardList.innerHTML = '';
+    if (!state.trashItems.length) {
+      const empty = document.createElement('div');
+      empty.className = 'trash-empty';
+      empty.textContent = 'Корзина пуста';
+      els.cardList.appendChild(empty);
+      return;
+    }
+    const section = document.createElement('div');
+    section.className = 'section-header';
+    section.innerHTML = `${window.icon('trash-2', 13)}<span>Корзина · ${state.trashItems.length} · хранится 30 дней</span>`;
+    els.cardList.appendChild(section);
+    state.trashItems.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'trash-item';
+      row.innerHTML = `
+        <div class="row1">
+          <div class="card-title">${escapeHtml(item.title)}</div>
+          <div class="trash-item-actions">
+            <button class="restore-btn" title="Восстановить">${window.icon('rotate-ccw', 13)}</button>
+            <button class="purge-btn danger" title="Удалить навсегда">${window.icon('x', 13)}</button>
+          </div>
+        </div>
+        <div class="card-summary">${escapeHtml(item.summary || '')}</div>
+        <div class="trash-item-path">${escapeHtml(item.originalPath)}</div>
+        <div class="trash-item-meta">удалено ${new Date(item.deletedAt).toLocaleDateString('ru-RU')} · осталось ${item.daysLeft} ${pluralDays(item.daysLeft)}</div>
+      `;
+      row.querySelector('.restore-btn').addEventListener('click', () => restoreTrashItem(item.trashId));
+      row.querySelector('.purge-btn').addEventListener('click', () => purgeTrashItem(item.trashId, item.title));
+      els.cardList.appendChild(row);
+    });
+  }
+
+  function pluralDays(n) {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'день';
+    if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return 'дня';
+    return 'дней';
+  }
+
+  async function restoreTrashItem(trashId) {
+    try {
+      const res = await fetch(`/api/trash/${encodeURIComponent(trashId)}/restore`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ошибка восстановления');
+      await loadTrash();
+      await loadCards();
+      renderList();
+    } catch (err) {
+      alert('Не удалось восстановить: ' + (err.message || err));
+    }
+  }
+
+  async function purgeTrashItem(trashId, title) {
+    if (!confirm(`Удалить «${title}» навсегда? Это нельзя отменить.`)) return;
+    try {
+      const res = await fetch(`/api/trash/${encodeURIComponent(trashId)}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ошибка удаления');
+      await loadTrash();
+      renderList();
+    } catch (err) {
+      alert('Не удалось удалить: ' + (err.message || err));
+    }
+  }
+
+  async function toggleTrashView() {
+    state.viewMode = state.viewMode === 'trash' ? 'cards' : 'trash';
+    els.trashToggle.classList.toggle('active', state.viewMode === 'trash');
+    els.filters.style.display = state.viewMode === 'trash' ? 'none' : 'flex';
+    els.search.parentElement.style.display = state.viewMode === 'trash' ? 'none' : 'block';
+    if (state.viewMode === 'trash') {
+      // Deselect the open file — its card may be about to be deleted, and
+      // showing a stale editor next to the trash list would be confusing.
+      state.selected = null;
+      state.activeFile = null;
+      renderHeader();
+      renderFileTabs();
+      els.editorToolbar.style.display = 'none';
+      els.rawPane.innerHTML = '<div id="empty-state">Выбери карточку слева</div>';
+      els.previewPane.innerHTML = '';
+      history.replaceState(null, '', location.pathname + location.search);
+      await loadTrash();
+    }
+    renderList();
   }
 
   async function selectCard(card, preferredFile) {
@@ -514,6 +617,31 @@
     const data = await res.json();
     els.saveStatus.textContent = res.ok ? 'INDEX.md обновлён ✓' : 'ошибка: ' + data.error;
   });
+  els.deleteBtn.addEventListener('click', deleteCurrentCard);
+  els.trashToggle.addEventListener('click', toggleTrashView);
+
+  async function deleteCurrentCard() {
+    const c = state.selected;
+    if (!c || !c.root) return; // no card open, or an ad-hoc file outside the tracked roots
+    if (!confirm(`Удалить «${c.title}»? Будет перемещено в корзину на 30 дней — восстановить можно оттуда.`)) return;
+    try {
+      const res = await fetch(`/api/entity?path=${encodeURIComponent(c.path)}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ошибка удаления');
+      state.selected = null;
+      state.activeFile = null;
+      state.dirty = false;
+      renderHeader();
+      renderFileTabs();
+      els.editorToolbar.style.display = 'none';
+      els.rawPane.innerHTML = '<div id="empty-state">Выбери карточку слева</div>';
+      els.previewPane.innerHTML = '';
+      history.replaceState(null, '', location.pathname + location.search);
+      await loadCards();
+    } catch (err) {
+      alert('Не удалось удалить: ' + (err.message || err));
+    }
+  }
 
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -581,6 +709,8 @@
     document.querySelector('.search-icon').innerHTML = window.icon('search', 14);
     els.saveBtn.innerHTML = `${window.icon('save', 14)}<span>Сохранить</span>`;
     els.reindexBtn.innerHTML = `${window.icon('refresh', 14)}<span>Пересобрать INDEX.md</span>`;
+    els.deleteBtn.innerHTML = `${window.icon('trash-2', 14)}<span>Удалить</span>`;
+    els.trashToggle.innerHTML = window.icon('trash-2', 15);
   }
 
   initStaticIcons();
