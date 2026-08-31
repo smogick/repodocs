@@ -1,4 +1,6 @@
 :root {
+  /* Dark palette — default, used unless the system prefers light or the
+     user explicitly picked a theme via the toggle. */
   --bg: #0f1115;
   --panel: #161923;
   --panel-2: #1d2130;
@@ -9,6 +11,23 @@
   --accent-2: #7ee0b8;
   --danger: #ff8080;
   --warn: #f2c14e;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --panel-2: #eef0f4;
+    --border: #dbdfe6;
+    --text: #1a1d24;
+    --muted: #6b7280;
+    --accent: #2f5fd0;
+    --accent-2: #12875a;
+    --danger: #c8324a;
+    --warn: #9a6b00;
+    --shadow: 0 1px 3px rgba(20, 24, 32, 0.08);
+  }
 }
 
 :root[data-theme="light"] {
@@ -22,6 +41,21 @@
   --accent-2: #12875a;
   --danger: #c8324a;
   --warn: #9a6b00;
+  --shadow: 0 1px 3px rgba(20, 24, 32, 0.08);
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --panel: #161923;
+  --panel-2: #1d2130;
+  --border: #2a2f3f;
+  --text: #e6e8ef;
+  --muted: #9096a8;
+  --accent: #6ea8fe;
+  --accent-2: #7ee0b8;
+  --danger: #ff8080;
+  --warn: #f2c14e;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 * { box-sizing: border-box; }
@@ -34,6 +68,22 @@ body {
   height: 100vh;
   overflow: hidden;
 }
+
+.i { flex: none; vertical-align: -2px; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.icon-btn:hover { color: var(--accent); border-color: var(--accent); }
 
 #app {
   display: grid;
@@ -68,25 +118,30 @@ body {
   color: var(--accent);
 }
 
-#theme-toggle {
-  padding: 3px 8px;
-  font-size: 13px;
-  line-height: 1;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  cursor: pointer;
+.search-wrap {
+  position: relative;
+}
+
+.search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
 }
 
 #search {
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 10px 8px 30px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--panel-2);
   color: var(--text);
   font-size: 13px;
+  transition: border-color 0.15s;
 }
+#search:focus { outline: none; border-color: var(--accent); }
 
 #filters {
   display: flex;
@@ -118,6 +173,9 @@ body {
 }
 
 .section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -126,12 +184,14 @@ body {
   padding: 12px 10px 6px;
 }
 .section-header:first-child { padding-top: 6px; }
+.section-header .i { opacity: 0.8; }
 
 .card-item {
   padding: 10px 10px;
   border-radius: 8px;
   cursor: pointer;
   margin-bottom: 3px;
+  transition: background-color 0.12s;
 }
 
 .card-matches {
@@ -206,6 +266,15 @@ body {
   background: var(--panel);
 }
 #frontmatter-bar b { color: var(--text); }
+#frontmatter-bar a {
+  color: var(--accent);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+#frontmatter-bar a:hover { text-decoration: underline; }
+#frontmatter-bar span { display: inline-flex; align-items: center; gap: 4px; }
 
 #file-tabs {
   display: flex;
@@ -223,7 +292,9 @@ body {
   cursor: pointer;
   color: var(--muted);
   border: 1px solid transparent;
+  transition: color 0.12s;
 }
+.file-tab:hover { color: var(--text); }
 .file-tab.active {
   color: var(--text);
   background: var(--bg);
@@ -254,8 +325,14 @@ button {
   background: var(--panel-2);
   color: var(--text);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.15s, background-color 0.15s;
 }
+button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); color: #0f1115; border-color: var(--accent); font-weight: 600; }
+button.primary:hover { filter: brightness(1.08); }
 button:disabled { opacity: 0.5; cursor: default; }
 
 #save-status { font-size: 12px; color: var(--muted); }

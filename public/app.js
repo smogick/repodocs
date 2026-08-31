@@ -31,6 +31,7 @@
   };
 
   const ROOT_LABELS = { projects: 'Проекты', areas: 'Области', resources: 'Ресурсы', archive: 'Архив' };
+  const ROOT_ICONS = { projects: 'layers', areas: 'folder', resources: 'book-open', archive: 'archive' };
 
   async function loadCards() {
     const res = await fetch('/api/cards');
@@ -127,7 +128,7 @@
     visibleByRoot.forEach(({ root, cards }) => {
       const section = document.createElement('div');
       section.className = 'section-header';
-      section.textContent = `${ROOT_LABELS[root] || root} · ${cards.length}`;
+      section.innerHTML = `${window.icon(ROOT_ICONS[root] || 'folder', 13)}<span>${ROOT_LABELS[root] || root} · ${cards.length}</span>`;
       els.cardList.appendChild(section);
       cards.forEach((card) => {
         const item = document.createElement('div');
@@ -189,12 +190,18 @@
     els.mainHeader.innerHTML = `<h2>${escapeHtml(c.title)}</h2><div class="sub">${c.path}</div>`;
     const links = Object.entries(c.links || {})
       .filter(([, v]) => v)
-      .map(([k, v]) => `<b>${k}</b>: ${escapeHtml(v)}`)
+      .map(([k, v]) => {
+        const isUrl = /^https?:\/\//i.test(v);
+        const valueHtml = isUrl
+          ? `<a href="${escapeHtml(v)}" target="_blank" rel="noopener">${escapeHtml(v)} ${window.icon('external-link', 11)}</a>`
+          : escapeHtml(v);
+        return `<b>${k}</b>: ${valueHtml}`;
+      })
       .join(' &nbsp;·&nbsp; ');
     els.frontmatterBar.innerHTML = `
       <span><b>status</b>: ${c.status}</span>
       <span><b>stack</b>: ${(c.stack || []).join(', ') || '—'}</span>
-      <span><b>tags</b>: ${(c.tags || []).join(', ') || '—'}</span>
+      <span>${window.icon('tag', 11)} ${(c.tags || []).join(', ') || '—'}</span>
       <span><b>owner</b>: ${c.owner || '—'}</span>
       <span><b>updated</b>: ${c.updated || '—'}</span>
       ${links ? `<span>${links}</span>` : ''}
@@ -434,23 +441,59 @@
     }
   });
 
-  function initTheme() {
-    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-    els.themeToggle.textContent = isLight ? '☀️' : '🌙';
-    els.themeToggle.addEventListener('click', () => {
-      const nowLight = document.documentElement.getAttribute('data-theme') !== 'light';
-      if (nowLight) {
-        document.documentElement.setAttribute('data-theme', 'light');
-      } else {
-        document.documentElement.removeAttribute('data-theme');
-      }
-      els.themeToggle.textContent = nowLight ? '☀️' : '🌙';
+  // Three-state theme: 'system' (follows prefers-color-scheme live, no
+  // explicit override), 'light', 'dark'. Toggle cycles system -> light ->
+  // dark -> system. Explicit choices persist in localStorage; 'system'
+  // means no stored value at all, so a future OS-theme change keeps working.
+  const THEME_META = {
+    system: { icon: 'monitor', title: 'Тема: системная (клик — светлая)' },
+    light: { icon: 'sun', title: 'Тема: светлая (клик — тёмная)' },
+    dark: { icon: 'moon', title: 'Тема: тёмная (клик — системная)' },
+  };
+
+  function currentThemeMode() {
+    const stored = (() => {
       try {
-        localStorage.setItem('repodocs-theme', nowLight ? 'light' : 'dark');
-      } catch (e) {}
+        return localStorage.getItem('repodocs-theme');
+      } catch (e) {
+        return null;
+      }
+    })();
+    return stored === 'light' || stored === 'dark' ? stored : 'system';
+  }
+
+  function applyThemeButton(mode) {
+    const meta = THEME_META[mode];
+    els.themeToggle.innerHTML = window.icon ? window.icon(meta.icon, 15) : '';
+    els.themeToggle.title = meta.title;
+  }
+
+  function initTheme() {
+    applyThemeButton(currentThemeMode());
+    els.themeToggle.addEventListener('click', () => {
+      const next = { system: 'light', light: 'dark', dark: 'system' }[currentThemeMode()];
+      if (next === 'system') {
+        document.documentElement.removeAttribute('data-theme');
+        try {
+          localStorage.removeItem('repodocs-theme');
+        } catch (e) {}
+      } else {
+        document.documentElement.setAttribute('data-theme', next);
+        try {
+          localStorage.setItem('repodocs-theme', next);
+        } catch (e) {}
+      }
+      applyThemeButton(next);
     });
   }
 
+  function initStaticIcons() {
+    document.querySelector('.search-icon').innerHTML = window.icon('search', 14);
+    els.saveBtn.innerHTML = `${window.icon('save', 14)}<span>Сохранить</span>`;
+    els.reindexBtn.innerHTML = `${window.icon('refresh', 14)}<span>Пересобрать INDEX.md</span>`;
+  }
+
+  initStaticIcons();
   initTheme();
   loadCards();
 })();
