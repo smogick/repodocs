@@ -370,6 +370,25 @@ button:disabled { opacity: 0.5; cursor: default; }
 #preview-pane th, #preview-pane td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
 #preview-pane blockquote { border-left: 3px solid var(--border); margin: 8px 0; padding: 4px 14px; color: var(--muted); }
 
+.mermaid-diagram {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0;
+  overflow-x: auto;
+  text-align: center;
+}
+.mermaid-diagram svg { max-width: 100%; height: auto; }
+
+.mermaid-error { border: 1px solid var(--danger); }
+.mermaid-error-note {
+  font-size: 12px;
+  color: var(--danger);
+  margin: -8px 0 12px;
+  font-family: "SF Mono", Menlo, monospace;
+}
+
 #empty-state {
   display: flex;
   align-items: center;

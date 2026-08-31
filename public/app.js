@@ -314,6 +314,48 @@
     const rawHtml = marked.parse(body, { gfm: true, breaks: false });
     els.previewPane.innerHTML = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target'] });
     wireInternalLinks();
+    renderMermaidBlocks();
+  }
+
+  let mermaidSeq = 0;
+
+  function isDarkTheme() {
+    const explicit = document.documentElement.getAttribute('data-theme');
+    if (explicit === 'light') return false;
+    if (explicit === 'dark') return true;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+
+  // Upgrades ```mermaid fenced code blocks (rendered by marked as
+  // <pre><code class="language-mermaid">) into rendered SVG diagrams.
+  async function renderMermaidBlocks() {
+    if (!window.mermaid) return;
+    const blocks = Array.from(els.previewPane.querySelectorAll('pre > code.language-mermaid'));
+    if (!blocks.length) return;
+    window.mermaid.initialize({ startOnLoad: false, theme: isDarkTheme() ? 'dark' : 'default', securityLevel: 'strict' });
+    for (const codeEl of blocks) {
+      const pre = codeEl.parentElement;
+      const source = codeEl.textContent;
+      const id = `mermaid-diagram-${++mermaidSeq}`;
+      try {
+        // Not passed through DOMPurify: mermaid's own securityLevel:'strict'
+        // already sanitizes label content internally, and running our SVG
+        // sanitizer on top strips <foreignObject> children (its hardcoded
+        // anti-mXSS behavior), which is how mermaid renders node labels —
+        // that would silently blank out every diagram's text.
+        const { svg } = await window.mermaid.render(id, source);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'mermaid-diagram';
+        wrapper.innerHTML = svg;
+        pre.replaceWith(wrapper);
+      } catch (err) {
+        pre.classList.add('mermaid-error');
+        const note = document.createElement('div');
+        note.className = 'mermaid-error-note';
+        note.textContent = 'Ошибка рендера mermaid: ' + (err && err.message ? err.message : err);
+        pre.after(note);
+      }
+    }
   }
 
   function escapeHtml(s) {
@@ -470,6 +512,13 @@
 
   function initTheme() {
     applyThemeButton(currentThemeMode());
+    if (window.matchMedia) {
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        if (currentThemeMode() !== 'system') return; // explicit choice overrides system changes
+        const ta = document.getElementById('raw-editor');
+        if (ta) renderPreview(ta.value);
+      });
+    }
     els.themeToggle.addEventListener('click', () => {
       const next = { system: 'light', light: 'dark', dark: 'system' }[currentThemeMode()];
       if (next === 'system') {
@@ -484,6 +533,8 @@
         } catch (e) {}
       }
       applyThemeButton(next);
+      const ta = document.getElementById('raw-editor');
+      if (ta) renderPreview(ta.value); // re-render so any mermaid diagrams pick up the new theme
     });
   }
 
