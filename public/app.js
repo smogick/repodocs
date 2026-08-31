@@ -8,6 +8,7 @@
     searchSeq: 0, // guards against out-of-order async search responses
     selected: null, // card object
     activeFile: null, // relative file path within card dir, e.g. 'README.md'
+    originalContent: '', // content as last loaded/saved, for real change detection
     dirty: false,
   };
 
@@ -239,9 +240,13 @@
       els.rawPane.innerHTML = `<textarea id="raw-editor" spellcheck="false"></textarea>`;
       const ta = document.getElementById('raw-editor');
       ta.value = data.content;
+      state.originalContent = data.content;
       ta.oninput = () => {
-        state.dirty = true;
-        els.saveStatus.textContent = 'не сохранено';
+        // Compare against the actually-loaded content, not "has the user
+        // typed anything" — typing something then undoing/deleting it back
+        // to the original text should not count as a pending change.
+        state.dirty = ta.value !== state.originalContent;
+        els.saveStatus.textContent = state.dirty ? 'не сохранено' : '';
         renderPreview(ta.value);
       };
       renderPreview(data.content);
@@ -288,6 +293,7 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'ошибка сохранения');
+      state.originalContent = ta.value;
       state.dirty = false;
       els.saveStatus.textContent = 'сохранено ✓';
       if (state.activeFile === c.mainFile) {
