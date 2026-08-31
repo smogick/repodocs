@@ -253,6 +253,7 @@
       els.saveStatus.textContent = '';
       state.dirty = false;
       setupSyncScroll(ta, els.previewPane);
+      updateUrlHash(fullPath);
     } catch (err) {
       els.rawPane.innerHTML = `<div id="empty-state">Ошибка: ${escapeHtml(String(err.message || err))}</div>`;
       els.previewPane.innerHTML = '';
@@ -391,6 +392,38 @@
       else stack.push(part);
     }
     return stack.join('/');
+  }
+
+  // Keeps the currently open file in the URL hash (#/projects/guardium/README.md)
+  // so a page reload — or a shared/bookmarked link — reopens the same file.
+  // Uses replaceState, not pushState: this mirrors "current tab", not
+  // browser back/forward history, so clicking through many files doesn't
+  // flood the history stack.
+  function updateUrlHash(fullPath) {
+    const hash = '#/' + fullPath;
+    if (location.hash !== hash) {
+      history.replaceState(null, '', hash);
+    }
+  }
+
+  async function openFromHash() {
+    const raw = location.hash.replace(/^#\/?/, '');
+    if (!raw) return;
+    let resolved;
+    try {
+      resolved = decodeURIComponent(raw);
+    } catch (e) {
+      return;
+    }
+    const match = findCardForPath(resolved);
+    if (!match) return;
+    state.selected = match.card;
+    state.activeFile = match.file;
+    state.dirty = false;
+    renderList();
+    renderHeader();
+    renderFileTabs();
+    await loadFile(match.file);
   }
 
   function findCardForPath(resolvedPath) {
@@ -552,5 +585,12 @@
 
   initStaticIcons();
   initTheme();
-  loadCards();
+  loadCards().then(openFromHash);
+
+  window.addEventListener('hashchange', () => {
+    // Ignore hash changes we caused ourselves via updateUrlHash (replaceState
+    // doesn't fire this event) — this only fires for external navigation:
+    // manual URL edits, or a bookmarked/shared link opened in this tab.
+    openFromHash();
+  });
 })();
