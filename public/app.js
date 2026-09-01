@@ -11,6 +11,7 @@
     originalContent: '', // content as last loaded/saved, for real change detection
     dirty: false,
     viewMode: 'cards', // 'cards' | 'trash'
+    paneMode: 'editor', // 'view' | 'editor' | 'source' — set for real in initPaneModeSwitch()
     trashItems: [],
   };
 
@@ -27,6 +28,8 @@
     editorToolbar: document.getElementById('editor-toolbar'),
     rawPane: document.getElementById('raw-pane'),
     previewPane: document.getElementById('preview-pane'),
+    contentPanes: document.getElementById('content-panes'),
+    paneModeSwitch: document.getElementById('pane-mode-switch'),
     saveBtn: document.getElementById('save-btn'),
     reindexBtn: document.getElementById('reindex-btn'),
     deleteBtn: document.getElementById('delete-btn'),
@@ -732,6 +735,47 @@
     els.themeToggle.title = meta.title;
   }
 
+  const PANE_MODES = [
+    { mode: 'view', icon: 'eye', title: 'Просмотр — только превью' },
+    { mode: 'editor', icon: 'columns-2', title: 'Редактор — превью и markdown рядом' },
+    { mode: 'source', icon: 'code', title: 'Source — только markdown' },
+  ];
+
+  function applyPaneMode() {
+    els.contentPanes.classList.remove('mode-view', 'mode-source');
+    if (state.paneMode === 'view') els.contentPanes.classList.add('mode-view');
+    if (state.paneMode === 'source') els.contentPanes.classList.add('mode-source');
+    els.paneModeSwitch.querySelectorAll('button').forEach((b) => {
+      b.classList.toggle('active', b.dataset.mode === state.paneMode);
+    });
+  }
+
+  function initPaneModeSwitch() {
+    let stored;
+    try {
+      stored = localStorage.getItem('repodocs-pane-mode');
+    } catch (e) {
+      stored = null;
+    }
+    state.paneMode = PANE_MODES.some((m) => m.mode === stored) ? stored : 'editor';
+    els.paneModeSwitch.innerHTML = '';
+    PANE_MODES.forEach(({ mode, icon, title }) => {
+      const btn = document.createElement('button');
+      btn.dataset.mode = mode;
+      btn.title = title;
+      btn.innerHTML = window.icon(icon, 13);
+      btn.addEventListener('click', () => {
+        state.paneMode = mode;
+        try {
+          localStorage.setItem('repodocs-pane-mode', mode);
+        } catch (e) {}
+        applyPaneMode();
+      });
+      els.paneModeSwitch.appendChild(btn);
+    });
+    applyPaneMode();
+  }
+
   function initTheme() {
     applyThemeButton(currentThemeMode());
     if (window.matchMedia) {
@@ -770,6 +814,7 @@
 
   initStaticIcons();
   initTheme();
+  initPaneModeSwitch();
   loadCards().then(openFromHash);
 
   window.addEventListener('hashchange', () => {
