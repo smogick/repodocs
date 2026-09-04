@@ -146,9 +146,12 @@
         const item = document.createElement('div');
         item.className = 'card-item' + (state.selected && state.selected.path === card.path ? ' selected' : '');
         const snippetsHtml = renderSnippetsFor(card);
+        const staleBadge = card.stale
+          ? `<span class="stale-badge" title="Содержимое менялось после последнего updated — возможно, забыли обновить дату">${window.icon('triangle-alert', 12)}</span>`
+          : '';
         item.innerHTML = `
           <div class="row1">
-            <div class="card-title"><span class="status-dot status-${card.status}"></span>${escapeHtml(card.title)}</div>
+            <div class="card-title"><span class="status-dot status-${card.status}"></span>${escapeHtml(card.title)}${staleBadge}</div>
           </div>
           <div class="card-summary">${escapeHtml(card.summary || '')}</div>
           <div class="card-meta"><span class="type-badge">${card.type}</span>${(card.stack || []).join(', ')}</div>
@@ -310,7 +313,7 @@
       <span><b>stack</b>: ${(c.stack || []).join(', ') || '—'}</span>
       <span>${window.icon('tag', 11)} ${(c.tags || []).join(', ') || '—'}</span>
       <span><b>owner</b>: ${c.owner || '—'}</span>
-      <span><b>updated</b>: ${c.updated || '—'}</span>
+      <span class="${c.stale ? 'stale-text' : ''}"><b>updated</b>: ${c.updated || '—'}${c.stale ? ` ${window.icon('triangle-alert', 11)} правки новее updated` : ''}</span>
       ${links ? `<span>${links}</span>` : ''}
     `;
   }

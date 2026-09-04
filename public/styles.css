@@ -238,6 +238,10 @@ body {
 .status-archived { background: var(--danger); }
 .status-unknown { background: var(--muted); }
 
+.stale-badge { display: inline-flex; vertical-align: -2px; margin-left: 5px; color: var(--warn); }
+.stale-text, .stale-text b { color: var(--warn) !important; }
+.stale-text .i { vertical-align: -2px; margin: 0 2px 0 4px; }
+
 .card-summary { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
 .card-meta { font-size: 10.5px; color: var(--muted); margin-top: 4px; }
 .card-meta .type-badge {

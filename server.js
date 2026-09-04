@@ -11,6 +11,15 @@ const PORT = process.env.PORT || 4173;
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// INDEX.md is generated, not hand-maintained — regenerate it whenever
+// something that could change its rows happens (a README save, a card
+// deleted/restored), so it never silently drifts out of date the way a
+// manual "click reindex" step would let it.
+function runReindex() {
+  delete require.cache[require.resolve('./scripts/build-index.js')];
+  require('./scripts/build-index.js');
+}
+
 app.get('/api/cards', (req, res) => {
   try {
     res.json(scanAll());
@@ -48,6 +57,7 @@ app.put('/api/file', (req, res) => {
       }
     }
     fs.writeFileSync(full, content, 'utf8');
+    if (path.basename(full) === 'README.md') runReindex();
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: String(err.message || err) });
@@ -97,6 +107,7 @@ app.delete('/api/entity', (req, res) => {
     const p = req.query.path;
     if (!p) return res.status(400).json({ error: 'path required' });
     const meta = trash.softDelete(String(p));
+    runReindex();
     res.json({ ok: true, trash: meta });
   } catch (err) {
     if (err.code === 'NOT_FOUND') return res.status(404).json({ error: 'not found' });
@@ -115,6 +126,7 @@ app.get('/api/trash', (req, res) => {
 app.post('/api/trash/:id/restore', (req, res) => {
   try {
     const meta = trash.restore(req.params.id);
+    runReindex();
     res.json({ ok: true, restored: meta });
   } catch (err) {
     if (err.code === 'NOT_FOUND') return res.status(404).json({ error: 'not found' });
@@ -136,8 +148,7 @@ app.delete('/api/trash/:id', (req, res) => {
 
 app.post('/api/reindex', (req, res) => {
   try {
-    delete require.cache[require.resolve('./scripts/build-index.js')];
-    require('./scripts/build-index.js');
+    runReindex();
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
