@@ -12,6 +12,7 @@
     dirty: false,
     viewMode: 'cards', // 'cards' | 'trash'
     paneMode: 'editor', // 'view' | 'editor' | 'source' — set for real in initPaneModeSwitch()
+    metaEditing: false, // whether the meta panel (frontmatter-bar) is in edit mode for the open file
     trashItems: [],
   };
 
@@ -300,6 +301,158 @@
       return;
     }
     els.mainHeader.innerHTML = `<h2>${escapeHtml(c.title)}</h2><div class="sub">${c.path}</div>`;
+    // The meta panel itself is rendered by renderMetaPanel() once the open
+    // file's raw content is available (loadFile calls it) — it needs the
+    // actual file, not just the card, since a sub-file has its own meta.
+  }
+
+  // --- Frontmatter read/write helpers -------------------------------
+  // Deliberately NOT a general YAML parser: this repo's frontmatter is a
+  // small, controlled shape (flat scalars, one array-per-line, one level
+  // of nesting for `links`), so editing it via targeted line replacement
+  // is much safer than a hand-rolled full reparse+reserialize, which risks
+  // mangling structure it doesn't understand. Anything the form doesn't
+  // touch is left byte-for-byte as it was.
+
+  function yamlScalarLine(key, value) {
+    const v = String(value ?? '').trim();
+    if (v === '') return `${key}: ""`;
+    const needsQuotes = /[:#\[\]{}]/.test(v) || /^\s|\s$/.test(v) || /^(true|false|null|~)$/i.test(v) || /^-?\d+(\.\d+)?$/.test(v);
+    return needsQuotes ? `${key}: "${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : `${key}: ${v}`;
+  }
+
+  function yamlArrayLine(key, arr) {
+    const items = (Array.isArray(arr) ? arr : String(arr || '').split(','))
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+    return `${key}: [${items.join(', ')}]`;
+  }
+
+  function unquoteYaml(v) {
+    const t = v.trim();
+    if (/^".*"$/.test(t)) return t.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    if (/^\[.*\]$/.test(t)) return t.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean);
+    return t;
+  }
+
+  function splitFrontmatterBlock(raw) {
+    const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+    if (!m) return { hasBlock: false, lines: [], body: raw };
+    return { hasBlock: true, lines: m[1].split('\n'), body: raw.slice(m[0].length) };
+  }
+
+  function joinFrontmatterBlock(lines, body) {
+    if (!lines.length) return body;
+    return `---\n${lines.join('\n')}\n---\n\n${body.replace(/^\n+/, '')}`;
+  }
+
+  function getTopField(lines, key) {
+    const re = new RegExp(`^${key}:\\s*(.*)$`);
+    for (const l of lines) {
+      const m = l.match(re);
+      if (m) return unquoteYaml(m[1]);
+    }
+    return '';
+  }
+
+  function setTopField(lines, key, valueLine) {
+    const re = new RegExp(`^${key}:`);
+    const idx = lines.findIndex((l) => re.test(l));
+    if (idx >= 0) lines[idx] = valueLine;
+    else lines.push(valueLine);
+  }
+
+  function getLinksField(lines, subKey) {
+    const linksIdx = lines.findIndex((l) => /^links:/.test(l));
+    if (linksIdx === -1) return '';
+    let end = linksIdx + 1;
+    while (end < lines.length && /^\s+\S/.test(lines[end])) end++;
+    const re = new RegExp(`^\\s+${subKey}:\\s*(.*)$`);
+    for (let i = linksIdx + 1; i < end; i++) {
+      const m = lines[i].match(re);
+      if (m) return unquoteYaml(m[1]);
+    }
+    return '';
+  }
+
+  function setLinksField(lines, subKey, value) {
+    let linksIdx = lines.findIndex((l) => /^links:/.test(l));
+    const newLine = `  ${subKey}: ${String(value ?? '').trim() === '' ? '""' : `"${String(value).trim().replace(/"/g, '\\"')}"`}`;
+    if (linksIdx === -1) {
+      lines.push('links:', newLine);
+      return;
+    }
+    let end = linksIdx + 1;
+    while (end < lines.length && /^\s+\S/.test(lines[end])) end++;
+    const re = new RegExp(`^\\s+${subKey}:`);
+    let found = false;
+    for (let i = linksIdx + 1; i < end; i++) {
+      if (re.test(lines[i])) {
+        lines[i] = newLine;
+        found = true;
+        break;
+      }
+    }
+    if (!found) lines.splice(end, 0, newLine);
+  }
+
+  const CARD_STATUS_OPTIONS = ['idea', 'active', 'paused', 'archived'];
+  const SUBFILE_STATUS_OPTIONS = ['', 'draft', 'active', 'superseded', 'archived'];
+  const SUBFILE_STATUS_LABELS = { '': '—', draft: 'черновик', active: 'актуально', superseded: 'заменено', archived: 'неактуально' };
+
+  function todayIso() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  // Renders the meta panel (#frontmatter-bar) for whatever file is
+  // currently open. README/mainFile gets the full card schema (title,
+  // type, status, stack, tags, owner, updated, links, summary) sourced
+  // from the parsed `card` object for display and from the raw frontmatter
+  // block for editing. Any other file gets a small, distinct sub-file
+  // schema (status/updated/summary) parsed straight from its own raw
+  // content — sub-files don't share the card's identity fields.
+  function renderMetaPanel(rawContent) {
+    const c = state.selected;
+    if (!c) {
+      els.frontmatterBar.innerHTML = '';
+      return;
+    }
+    const isMain = state.activeFile === c.mainFile;
+    const { lines, hasBlock } = splitFrontmatterBlock(rawContent || '');
+
+    if (!state.metaEditing) {
+      els.frontmatterBar.innerHTML = isMain ? renderCardMetaView(c) : renderSubfileMetaView(lines, hasBlock);
+      const editBtn = els.frontmatterBar.querySelector('.meta-edit-btn');
+      if (editBtn) {
+        editBtn.addEventListener('click', () => {
+          state.metaEditing = true;
+          renderMetaPanel(document.getElementById('raw-editor')?.value ?? rawContent);
+        });
+      }
+      return;
+    }
+
+    els.frontmatterBar.innerHTML = isMain ? renderCardMetaEdit(lines) : renderSubfileMetaEdit(lines);
+    const cancelBtn = els.frontmatterBar.querySelector('.meta-cancel-btn');
+    const saveBtn = els.frontmatterBar.querySelector('.meta-save-btn');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        state.metaEditing = false;
+        renderMetaPanel(document.getElementById('raw-editor')?.value ?? rawContent);
+      });
+    }
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => applyMetaEdit(isMain));
+    }
+  }
+
+  function formatDateOnly(v) {
+    const s = String(v || '');
+    const m = s.match(/^\d{4}-\d{2}-\d{2}/);
+    return m ? m[0] : s;
+  }
+
+  function renderCardMetaView(c) {
     const links = Object.entries(c.links || {})
       .filter(([, v]) => v)
       .map(([k, v]) => {
@@ -310,14 +463,130 @@
         return `<b>${k}</b>: ${valueHtml}`;
       })
       .join(' &nbsp;·&nbsp; ');
-    els.frontmatterBar.innerHTML = `
+    return `
+      <button class="icon-btn meta-edit-btn" title="Редактировать метаданные">${window.icon('pencil', 12)}</button>
       <span><b>status</b>: ${c.status}</span>
       <span><b>stack</b>: ${(c.stack || []).join(', ') || '—'}</span>
       <span>${window.icon('tag', 11)} ${(c.tags || []).join(', ') || '—'}</span>
       <span><b>owner</b>: ${c.owner || '—'}</span>
-      <span class="${c.stale ? 'stale-text' : ''}"><b>updated</b>: ${c.updated || '—'}${c.stale ? ` ${window.icon('triangle-alert', 11)} правки новее updated` : ''}</span>
+      <span class="${c.stale ? 'stale-text' : ''}"><b>updated</b>: ${formatDateOnly(c.updated) || '—'}${c.stale ? ` ${window.icon('triangle-alert', 11)} правки новее updated` : ''}</span>
       ${links ? `<span>${links}</span>` : ''}
     `;
+  }
+
+  function renderSubfileMetaView(lines, hasBlock) {
+    const status = getTopField(lines, 'status');
+    const updated = getTopField(lines, 'updated');
+    const summary = getTopField(lines, 'summary');
+    if (!hasBlock || (!status && !updated && !summary)) {
+      return `
+        <button class="icon-btn meta-edit-btn" title="Добавить метаданные файла">${window.icon('pencil', 12)}</button>
+        <span class="meta-empty-hint">Нет метаданных у этого файла — статус/дату/summary можно добавить отдельно от карточки</span>
+      `;
+    }
+    return `
+      <button class="icon-btn meta-edit-btn" title="Редактировать метаданные файла">${window.icon('pencil', 12)}</button>
+      <span><b>статус файла</b>: ${SUBFILE_STATUS_LABELS[status] || status || '—'}</span>
+      <span><b>updated</b>: ${updated || '—'}</span>
+      ${summary ? `<span><b>summary</b>: ${escapeHtml(summary)}</span>` : ''}
+    `;
+  }
+
+  function renderCardMetaEdit(lines) {
+    const title = getTopField(lines, 'title');
+    const type = getTopField(lines, 'type') || 'project';
+    const status = getTopField(lines, 'status') || 'active';
+    const stack = getTopField(lines, 'stack');
+    const tags = getTopField(lines, 'tags');
+    const owner = getTopField(lines, 'owner');
+    const updated = getTopField(lines, 'updated');
+    const summary = getTopField(lines, 'summary');
+    const repo = getLinksField(lines, 'repo');
+    const tracker = getLinksField(lines, 'tracker');
+    const docs = getLinksField(lines, 'docs');
+    const statusOptions = CARD_STATUS_OPTIONS.map((s) => `<option value="${s}"${s === status ? ' selected' : ''}>${s}</option>`).join('');
+    return `
+      <div class="meta-edit-form">
+        <label>title <input data-f="title" value="${escapeHtml(title)}" /></label>
+        <label>type <select data-f="type"><option value="project"${type === 'project' ? ' selected' : ''}>project</option><option value="area"${type === 'area' ? ' selected' : ''}>area</option><option value="resource"${type === 'resource' ? ' selected' : ''}>resource</option></select></label>
+        <label>status <select data-f="status">${statusOptions}</select></label>
+        <label>stack <input data-f="stack" value="${escapeHtml(Array.isArray(stack) ? stack.join(', ') : stack)}" placeholder="go, react, ..." /></label>
+        <label>tags <input data-f="tags" value="${escapeHtml(Array.isArray(tags) ? tags.join(', ') : tags)}" placeholder="tag1, tag2, ..." /></label>
+        <label>owner <input data-f="owner" value="${escapeHtml(owner)}" /></label>
+        <label>updated <input data-f="updated" type="date" value="${escapeHtml(updated)}" /></label>
+        <label>repo <input data-f="repo" value="${escapeHtml(repo)}" /></label>
+        <label>tracker <input data-f="tracker" value="${escapeHtml(tracker)}" /></label>
+        <label>docs <input data-f="docs" value="${escapeHtml(docs)}" /></label>
+        <label class="meta-summary">summary <input data-f="summary" value="${escapeHtml(summary)}" /></label>
+        <div class="meta-edit-actions">
+          <button class="primary meta-save-btn">${window.icon('check', 12)} Сохранить</button>
+          <button class="meta-cancel-btn">Отмена</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderSubfileMetaEdit(lines) {
+    const status = getTopField(lines, 'status');
+    const updated = getTopField(lines, 'updated') || todayIso();
+    const summary = getTopField(lines, 'summary');
+    const statusOptions = SUBFILE_STATUS_OPTIONS.map(
+      (s) => `<option value="${s}"${s === status ? ' selected' : ''}>${SUBFILE_STATUS_LABELS[s]}</option>`
+    ).join('');
+    return `
+      <div class="meta-edit-form">
+        <label>статус файла <select data-f="status">${statusOptions}</select></label>
+        <label>updated <input data-f="updated" type="date" value="${escapeHtml(updated)}" /></label>
+        <label class="meta-summary">summary <input data-f="summary" value="${escapeHtml(summary)}" /></label>
+        <div class="meta-edit-actions">
+          <button class="primary meta-save-btn">${window.icon('check', 12)} Сохранить</button>
+          <button class="meta-cancel-btn">Отмена</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function applyMetaEdit(isMain) {
+    const ta = document.getElementById('raw-editor');
+    if (!ta) return;
+    const form = els.frontmatterBar.querySelector('.meta-edit-form');
+    const field = (name) => form.querySelector(`[data-f="${name}"]`)?.value ?? '';
+    const { lines, hasBlock, body } = splitFrontmatterBlock(ta.value);
+
+    if (isMain) {
+      setTopField(lines, 'title', yamlScalarLine('title', field('title')));
+      setTopField(lines, 'type', yamlScalarLine('type', field('type')));
+      setTopField(lines, 'status', yamlScalarLine('status', field('status')));
+      setTopField(lines, 'stack', yamlArrayLine('stack', field('stack').split(',')));
+      setTopField(lines, 'tags', yamlArrayLine('tags', field('tags').split(',')));
+      setTopField(lines, 'owner', yamlScalarLine('owner', field('owner')));
+      setTopField(lines, 'updated', yamlScalarLine('updated', field('updated')));
+      setTopField(lines, 'summary', yamlScalarLine('summary', field('summary')));
+      setLinksField(lines, 'repo', field('repo'));
+      setLinksField(lines, 'tracker', field('tracker'));
+      setLinksField(lines, 'docs', field('docs'));
+    } else {
+      const status = field('status');
+      const updated = field('updated');
+      const summary = field('summary');
+      if (!status && !updated && !summary) {
+        // nothing to keep — drop the block entirely rather than leaving an
+        // empty one, since sub-file frontmatter is optional in the first place
+        ta.value = body;
+        ta.dispatchEvent(new Event('input'));
+        state.metaEditing = false;
+        saveCurrent();
+        return;
+      }
+      if (status) setTopField(lines, 'status', yamlScalarLine('status', status));
+      if (updated) setTopField(lines, 'updated', yamlScalarLine('updated', updated));
+      if (summary) setTopField(lines, 'summary', yamlScalarLine('summary', summary));
+    }
+
+    ta.value = joinFrontmatterBlock(lines, body);
+    ta.dispatchEvent(new Event('input'));
+    state.metaEditing = false;
+    saveCurrent();
   }
 
   // Folder paths currently collapsed, per card (cardPath -> Set<folderPath>).
@@ -486,8 +755,10 @@
       renderPreview(data.content);
       els.saveStatus.textContent = '';
       state.dirty = false;
+      state.metaEditing = false;
       setupSyncScroll(ta, els.previewPane);
       updateUrlHash(fullPath);
+      renderMetaPanel(data.content);
     } catch (err) {
       els.rawPane.innerHTML = `<div id="empty-state">Ошибка: ${escapeHtml(String(err.message || err))}</div>`;
       els.previewPane.innerHTML = '';
@@ -544,6 +815,7 @@
           renderFileTree();
         }
       }
+      renderMetaPanel(ta.value);
     } catch (err) {
       els.saveStatus.textContent = 'ошибка: ' + (err.message || err);
     }
