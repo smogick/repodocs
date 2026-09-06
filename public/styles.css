@@ -362,6 +362,15 @@ body {
 
 .tree-folder-empty-hint { color: var(--muted); font-style: italic; opacity: 0.7; }
 
+.tree-file { cursor: grab; }
+.tree-row-wrap.dragging .tree-row { opacity: 0.4; }
+.tree-folder.drag-over,
+.tree-row-wrap.drag-over .tree-row {
+  background: var(--panel-2);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  border-radius: 5px;
+}
+
 .tree-empty {
   padding: 16px 10px;
   color: var(--muted);

@@ -632,6 +632,21 @@
     els.fileTree.appendChild(container);
   }
 
+  // Dropping on empty tree background — anywhere in #file-tree that isn't a
+  // folder/file row, which stopPropagation their own drop handlers before
+  // this ever sees the event — moves the file to card root. Attached once
+  // to the element that survives re-renders (renderFileTree only clears
+  // its children), not to the inner container div rebuilt on every render,
+  // so this doesn't accumulate duplicate listeners over time.
+  els.fileTree.addEventListener('dragover', (e) => e.preventDefault());
+  els.fileTree.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const src = e.dataTransfer.getData('text/plain');
+    if (!src) return;
+    const name = src.split('/').pop();
+    if (name !== src) moveFile(src, name);
+  });
+
   function renderTreeLevel(node, container, depth, pathPrefix, collapsed) {
     const entries = Array.from(node.children.values());
     const dirs = entries.filter((n) => n.type === 'dir').sort((a, b) => a.name.localeCompare(b.name, 'ru'));
@@ -649,6 +664,21 @@
         else collapsed.add(folderPath);
         collapsedFolders.set(state.selected.path, collapsed);
         renderFileTree();
+      });
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        row.classList.add('drag-over');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+      row.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        row.classList.remove('drag-over');
+        const src = e.dataTransfer.getData('text/plain');
+        if (!src) return;
+        const toFile = `${folderPath}/${src.split('/').pop()}`;
+        if (toFile !== src) moveFile(src, toFile);
       });
       container.appendChild(row);
       if (!isCollapsed) {
@@ -678,6 +708,30 @@
         renderFileTree();
         await loadFile(file.path);
       });
+      row.draggable = true;
+      row.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', file.path);
+        e.dataTransfer.effectAllowed = 'move';
+        wrap.classList.add('dragging');
+      });
+      row.addEventListener('dragend', () => wrap.classList.remove('dragging'));
+      // Dropping onto a sibling file lands in that file's own folder —
+      // same target as dropping directly on the folder row itself.
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (state.activeFile !== file.path) wrap.classList.add('drag-over');
+      });
+      row.addEventListener('dragleave', () => wrap.classList.remove('drag-over'));
+      row.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        wrap.classList.remove('drag-over');
+        const src = e.dataTransfer.getData('text/plain');
+        if (!src || src === file.path) return;
+        const toFile = pathPrefix ? `${pathPrefix}/${src.split('/').pop()}` : src.split('/').pop();
+        if (toFile !== src) moveFile(src, toFile);
+      });
       const actions = document.createElement('div');
       actions.className = 'tree-row-actions';
       const moveBtn = document.createElement('button');
@@ -695,8 +749,6 @@
   }
 
   async function moveFilePrompt(currentRelPath) {
-    const c = state.selected;
-    if (!c) return;
     const next = prompt('Новый путь файла внутри карточки (можно с подпапками):', currentRelPath);
     if (next === null) return;
     const toFile = next.trim().replace(/^\/+/, '');
@@ -705,15 +757,23 @@
       alert('Путь должен заканчиваться на .md');
       return;
     }
+    await moveFile(currentRelPath, toFile);
+  }
+
+  // Shared by the pencil-prompt move and drag & drop — actually calls
+  // /api/file/move and refreshes the tree/open file afterward.
+  async function moveFile(fromFile, toFile) {
+    const c = state.selected;
+    if (!c || fromFile === toFile) return;
     try {
       const res = await fetch('/api/file/move', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseDir: c.baseDir, fromFile: currentRelPath, toFile }),
+        body: JSON.stringify({ baseDir: c.baseDir, fromFile, toFile }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'ошибка перемещения');
-      const wasActive = state.activeFile === currentRelPath;
+      const wasActive = state.activeFile === fromFile;
       await loadCards();
       const refreshed = state.cards.find((x) => x.path === c.path);
       if (refreshed) {
