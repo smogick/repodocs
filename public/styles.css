@@ -260,6 +260,7 @@ body {
 }
 
 #main-header h2 { margin: 0 0 4px; font-size: 18px; }
+#main-header .header-file { color: var(--muted); font-weight: 400; }
 #main-header .sub { color: var(--muted); font-size: 12px; }
 
 #frontmatter-bar {

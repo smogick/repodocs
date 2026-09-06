@@ -293,6 +293,9 @@
     await loadFile(state.activeFile);
   }
 
+  // Reflects whichever file is actually open, not just the card — switching
+  // files inside the tree (without switching cards) must update this too,
+  // which is why loadFile() calls it on every load, not just selectCard().
   function renderHeader() {
     const c = state.selected;
     if (!c) {
@@ -300,7 +303,10 @@
       els.frontmatterBar.innerHTML = '';
       return;
     }
-    els.mainHeader.innerHTML = `<h2>${escapeHtml(c.title)}</h2><div class="sub">${c.path}</div>`;
+    const isMain = !state.activeFile || state.activeFile === c.mainFile;
+    const fileSuffix = isMain ? '' : ` <span class="header-file">— ${escapeHtml(state.activeFile)}</span>`;
+    const subPath = isMain ? c.path : `${c.path}/${state.activeFile}`;
+    els.mainHeader.innerHTML = `<h2>${escapeHtml(c.title)}${fileSuffix}</h2><div class="sub">${escapeHtml(subPath)}</div>`;
     // The meta panel itself is rendered by renderMetaPanel() once the open
     // file's raw content is available (loadFile calls it) — it needs the
     // actual file, not just the card, since a sub-file has its own meta.
@@ -818,6 +824,7 @@
       state.metaEditing = false;
       setupSyncScroll(ta, els.previewPane);
       updateUrlHash(fullPath);
+      renderHeader();
       renderMetaPanel(data.content);
     } catch (err) {
       els.rawPane.innerHTML = `<div id="empty-state">Ошибка: ${escapeHtml(String(err.message || err))}</div>`;
