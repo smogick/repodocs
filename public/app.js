@@ -681,10 +681,18 @@
   els.deleteBtn.addEventListener('click', deleteCurrentCard);
   els.trashToggle.addEventListener('click', toggleTrashView);
 
+  // "Удалить" acts on whatever is actually open: the whole card only when
+  // the card's own README is showing, otherwise just the open sub-file —
+  // deleting e.g. team.md inside Guardium must not take the whole project
+  // down with it.
   async function deleteCurrentCard() {
     const c = state.selected;
     if (!c || !c.root) return; // no card open, or an ad-hoc file outside the tracked roots
-    if (!confirm(`Удалить «${c.title}»? Будет перемещено в корзину на 30 дней — восстановить можно оттуда.`)) return;
+    if (state.activeFile && state.activeFile !== c.mainFile) {
+      await deleteCurrentSubfile(c);
+      return;
+    }
+    if (!confirm(`Удалить весь проект «${c.title}»? Будет перемещено в корзину на 30 дней — восстановить можно оттуда.`)) return;
     try {
       const res = await fetch(`/api/entity?path=${encodeURIComponent(c.path)}`, { method: 'DELETE' });
       const data = await res.json();
@@ -699,6 +707,30 @@
       els.previewPane.innerHTML = '';
       history.replaceState(null, '', location.pathname + location.search);
       await loadCards();
+    } catch (err) {
+      alert('Не удалось удалить: ' + (err.message || err));
+    }
+  }
+
+  async function deleteCurrentSubfile(c) {
+    const file = state.activeFile;
+    if (!confirm(`Удалить файл «${file}» из «${c.title}»? Будет перемещён в корзину на 30 дней.`)) return;
+    try {
+      const res = await fetch(
+        `/api/file?baseDir=${encodeURIComponent(c.baseDir)}&file=${encodeURIComponent(file)}`,
+        { method: 'DELETE' }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ошибка удаления');
+      await loadCards();
+      const refreshed = state.cards.find((x) => x.path === c.path);
+      if (refreshed) {
+        state.selected = refreshed;
+        state.activeFile = refreshed.mainFile;
+        renderHeader();
+        renderFileTree();
+        await loadFile(refreshed.mainFile);
+      }
     } catch (err) {
       alert('Не удалось удалить: ' + (err.message || err));
     }

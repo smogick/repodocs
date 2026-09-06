@@ -102,6 +102,24 @@ app.get('/api/search', (req, res) => {
   }
 });
 
+app.delete('/api/file', (req, res) => {
+  try {
+    const baseDir = req.query.baseDir;
+    const file = req.query.file;
+    if (!baseDir || !file) return res.status(400).json({ error: 'baseDir and file required' });
+    if (path.basename(String(file)) === 'README.md') {
+      return res.status(400).json({ error: 'README.md — это сама карточка, удаляй через DELETE /api/entity' });
+    }
+    resolveSafePath(`${baseDir}/${file}`); // throws if outside docs/ or not markdown
+    const meta = trash.softDeleteSubfile(String(baseDir), String(file));
+    runReindex(); // file lists shown in INDEX.md links are unaffected, but harmless/cheap to keep in sync
+    res.json({ ok: true, trash: meta });
+  } catch (err) {
+    if (err.code === 'NOT_FOUND') return res.status(404).json({ error: 'not found' });
+    res.status(400).json({ error: String(err.message || err) });
+  }
+});
+
 app.delete('/api/entity', (req, res) => {
   try {
     const p = req.query.path;
