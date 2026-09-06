@@ -25,6 +25,8 @@
     mainHeader: document.getElementById('main-header'),
     frontmatterBar: document.getElementById('frontmatter-bar'),
     fileTree: document.getElementById("file-tree"),
+    newFileBtn: document.getElementById('new-file-btn'),
+    newFolderBtn: document.getElementById('new-folder-btn'),
     editorToolbar: document.getElementById('editor-toolbar'),
     rawPane: document.getElementById('raw-pane'),
     previewPane: document.getElementById('preview-pane'),
@@ -322,20 +324,23 @@
   // Folders default to expanded — nothing here until the user collapses one.
   const collapsedFolders = new Map();
 
-  function buildFileTree(files) {
+  function buildFileTree(files, emptyDirs) {
     const root = { type: 'dir', children: new Map() };
+    const ensureDir = (parts) => {
+      let node = root;
+      parts.forEach((part) => {
+        if (!node.children.has(part)) node.children.set(part, { type: 'dir', name: part, children: new Map() });
+        node = node.children.get(part);
+      });
+      return node;
+    };
     files.forEach((f) => {
       const parts = f.split('/');
-      let node = root;
-      parts.forEach((part, i) => {
-        if (i === parts.length - 1) {
-          node.children.set(part, { type: 'file', name: part, path: f });
-        } else {
-          if (!node.children.has(part)) node.children.set(part, { type: 'dir', name: part, children: new Map() });
-          node = node.children.get(part);
-        }
-      });
+      const dirNode = ensureDir(parts.slice(0, -1));
+      const name = parts[parts.length - 1];
+      dirNode.children.set(name, { type: 'file', name, path: f });
     });
+    (emptyDirs || []).forEach((d) => ensureDir(d.split('/')));
     return root;
   }
 
@@ -344,10 +349,14 @@
     const c = state.selected;
     if (!c) {
       els.fileTree.innerHTML = '<div class="tree-empty">Выбери карточку слева</div>';
+      els.newFileBtn.disabled = true;
+      els.newFolderBtn.disabled = true;
       return;
     }
+    els.newFileBtn.disabled = false;
+    els.newFolderBtn.disabled = false;
     const files = c.files && c.files.length ? c.files : [c.mainFile || 'README.md'];
-    const tree = buildFileTree(files);
+    const tree = buildFileTree(files, c.emptyDirs);
     const collapsed = collapsedFolders.get(c.path) || new Set();
     const container = document.createElement('div');
     renderTreeLevel(tree, container, 0, '', collapsed);
@@ -373,10 +382,22 @@
         renderFileTree();
       });
       container.appendChild(row);
-      if (!isCollapsed) renderTreeLevel(dir, container, depth + 1, folderPath, collapsed);
+      if (!isCollapsed) {
+        if (dir.children.size === 0) {
+          const hint = document.createElement('div');
+          hint.className = 'tree-row tree-folder-empty-hint';
+          hint.style.paddingLeft = `${8 + (depth + 1) * 14 + 17}px`;
+          hint.textContent = 'пусто';
+          container.appendChild(hint);
+        } else {
+          renderTreeLevel(dir, container, depth + 1, folderPath, collapsed);
+        }
+      }
     });
 
     filesArr.forEach((file) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'tree-row-wrap';
       const row = document.createElement('div');
       row.className = 'tree-row tree-file' + (state.activeFile === file.path ? ' active' : '');
       row.style.paddingLeft = `${8 + depth * 14 + 17}px`;
@@ -388,8 +409,57 @@
         renderFileTree();
         await loadFile(file.path);
       });
-      container.appendChild(row);
+      const actions = document.createElement('div');
+      actions.className = 'tree-row-actions';
+      const moveBtn = document.createElement('button');
+      moveBtn.title = 'Переместить/переименовать';
+      moveBtn.innerHTML = window.icon('pencil', 11);
+      moveBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        moveFilePrompt(file.path);
+      });
+      actions.appendChild(moveBtn);
+      wrap.appendChild(row);
+      wrap.appendChild(actions);
+      container.appendChild(wrap);
     });
+  }
+
+  async function moveFilePrompt(currentRelPath) {
+    const c = state.selected;
+    if (!c) return;
+    const next = prompt('Новый путь файла внутри карточки (можно с подпапками):', currentRelPath);
+    if (next === null) return;
+    const toFile = next.trim().replace(/^\/+/, '');
+    if (!toFile || toFile === currentRelPath) return;
+    if (!/\.md$/i.test(toFile)) {
+      alert('Путь должен заканчиваться на .md');
+      return;
+    }
+    try {
+      const res = await fetch('/api/file/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseDir: c.baseDir, fromFile: currentRelPath, toFile }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ошибка перемещения');
+      const wasActive = state.activeFile === currentRelPath;
+      await loadCards();
+      const refreshed = state.cards.find((x) => x.path === c.path);
+      if (refreshed) {
+        state.selected = refreshed;
+        if (wasActive) {
+          state.activeFile = toFile;
+          renderFileTree();
+          await loadFile(toFile);
+        } else {
+          renderFileTree();
+        }
+      }
+    } catch (err) {
+      alert('Не удалось переместить: ' + (err.message || err));
+    }
   }
 
   async function loadFile(relFile) {
@@ -680,6 +750,65 @@
   });
   els.deleteBtn.addEventListener('click', deleteCurrentCard);
   els.trashToggle.addEventListener('click', toggleTrashView);
+  els.newFileBtn.addEventListener('click', createFilePrompt);
+  els.newFolderBtn.addEventListener('click', createFolderPrompt);
+
+  async function createFilePrompt() {
+    const c = state.selected;
+    if (!c) return;
+    const relFile = prompt('Путь нового файла внутри карточки (можно с подпапками, напр. module/overview.md):', '');
+    if (!relFile) return;
+    const clean = relFile.trim().replace(/^\/+/, '');
+    if (!/\.md$/i.test(clean)) {
+      alert('Путь должен заканчиваться на .md');
+      return;
+    }
+    try {
+      const res = await fetch('/api/file/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseDir: c.baseDir, relFile: clean, content: '' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ошибка создания');
+      await loadCards();
+      const refreshed = state.cards.find((x) => x.path === c.path);
+      if (refreshed) {
+        state.selected = refreshed;
+        state.activeFile = clean;
+        renderFileTree();
+        await loadFile(clean);
+      }
+    } catch (err) {
+      alert('Не удалось создать файл: ' + (err.message || err));
+    }
+  }
+
+  async function createFolderPrompt() {
+    const c = state.selected;
+    if (!c) return;
+    const relDir = prompt('Название новой папки (можно с подпапками, напр. module/sub):', '');
+    if (!relDir) return;
+    const clean = relDir.trim().replace(/^\/+|\/+$/g, '');
+    if (!clean) return;
+    try {
+      const res = await fetch('/api/dir/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseDir: c.baseDir, relDir: clean }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ошибка создания папки');
+      await loadCards();
+      const refreshed = state.cards.find((x) => x.path === c.path);
+      if (refreshed) {
+        state.selected = refreshed;
+        renderFileTree();
+      }
+    } catch (err) {
+      alert('Не удалось создать папку: ' + (err.message || err));
+    }
+  }
 
   // "Удалить" acts on whatever is actually open: the whole card only when
   // the card's own README is showing, otherwise just the open sub-file —
@@ -845,11 +974,14 @@
     els.reindexBtn.innerHTML = `${window.icon('refresh', 14)}<span>Пересобрать INDEX.md</span>`;
     els.deleteBtn.innerHTML = `${window.icon('trash-2', 14)}<span>Удалить</span>`;
     els.trashToggle.innerHTML = window.icon('trash-2', 15);
+    els.newFileBtn.innerHTML = window.icon('file-plus', 14);
+    els.newFolderBtn.innerHTML = window.icon('folder-plus', 14);
   }
 
   initStaticIcons();
   initTheme();
   initPaneModeSwitch();
+  renderFileTree(); // sets initial disabled state for the toolbar buttons
   loadCards().then(openFromHash);
 
   window.addEventListener('hashchange', () => {

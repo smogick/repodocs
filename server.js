@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const express = require('express');
 const matter = require('gray-matter');
-const { REPO_ROOT, scanAll, resolveSafePath } = require('./lib/scan');
+const { REPO_ROOT, scanAll, resolveSafePath, resolveSafeDirPath } = require('./lib/scan');
 const trash = require('./lib/trash');
 
 const app = express();
@@ -58,6 +58,66 @@ app.put('/api/file', (req, res) => {
     }
     fs.writeFileSync(full, content, 'utf8');
     if (path.basename(full) === 'README.md') runReindex();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: String(err.message || err) });
+  }
+});
+
+// Creates a new markdown file within an existing card. `relFile` may
+// include subfolders (e.g. "newmodule/overview.md") — intermediate
+// directories are created as needed, which is also how a "new folder"
+// effectively comes into being once it holds a file.
+app.post('/api/file/create', (req, res) => {
+  try {
+    const { baseDir, relFile, content } = req.body || {};
+    if (!baseDir || !relFile) return res.status(400).json({ error: 'baseDir and relFile required' });
+    if (path.basename(String(relFile)) === 'README.md') {
+      return res.status(400).json({ error: 'README.md создаётся вместе с самой карточкой, не как обычный файл' });
+    }
+    const full = resolveSafePath(`${baseDir}/${relFile}`);
+    if (fs.existsSync(full)) return res.status(409).json({ error: 'файл с таким путём уже существует' });
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, typeof content === 'string' ? content : '', 'utf8');
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: String(err.message || err) });
+  }
+});
+
+// Creates an empty directory — visible in the tree via GET /api/cards'
+// emptyDirs even before it holds any file.
+app.post('/api/dir/create', (req, res) => {
+  try {
+    const { baseDir, relDir } = req.body || {};
+    if (!baseDir || !relDir) return res.status(400).json({ error: 'baseDir and relDir required' });
+    const full = resolveSafeDirPath(`${baseDir}/${relDir}`);
+    if (fs.existsSync(full)) return res.status(409).json({ error: 'папка с таким путём уже существует' });
+    fs.mkdirSync(full, { recursive: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: String(err.message || err) });
+  }
+});
+
+// Moves/renames a single markdown file within a card, e.g. into or out of
+// a subfolder. README.md is excluded — it's the card's identity file, not
+// a file to relocate independently.
+app.post('/api/file/move', (req, res) => {
+  try {
+    const { baseDir, fromFile, toFile } = req.body || {};
+    if (!baseDir || !fromFile || !toFile) {
+      return res.status(400).json({ error: 'baseDir, fromFile and toFile required' });
+    }
+    if (path.basename(String(fromFile)) === 'README.md' || path.basename(String(toFile)) === 'README.md') {
+      return res.status(400).json({ error: 'README.md нельзя переместить/переименовать этим способом' });
+    }
+    const fromFull = resolveSafePath(`${baseDir}/${fromFile}`);
+    const toFull = resolveSafePath(`${baseDir}/${toFile}`);
+    if (!fs.existsSync(fromFull)) return res.status(404).json({ error: 'исходный файл не найден' });
+    if (fs.existsSync(toFull)) return res.status(409).json({ error: 'файл с таким путём уже существует' });
+    fs.mkdirSync(path.dirname(toFull), { recursive: true });
+    fs.renameSync(fromFull, toFull);
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: String(err.message || err) });
