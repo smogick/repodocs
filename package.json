@@ -2,6 +2,7 @@
   "name": "repodocs-ui",
   "version": "1.0.0",
   "private": true,
+  "description": "Local web UI for a markdown knowledge base (repodocs)",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",

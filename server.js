@@ -2,11 +2,11 @@ const path = require('path');
 const fs = require('fs');
 const express = require('express');
 const matter = require('gray-matter');
-const { REPO_ROOT, scanAll, resolveSafePath, resolveSafeDirPath } = require('./lib/scan');
+const { CONFIG, REPO_ROOT, DOCS_ROOT, scanAll, resolveSafePath, resolveSafeDirPath } = require('./lib/scan');
 const trash = require('./lib/trash');
 
 const app = express();
-const PORT = process.env.PORT || 4173;
+const PORT = CONFIG.port;
 
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -237,5 +237,6 @@ trash.purgeExpired();
 
 app.listen(PORT, () => {
   console.log(`repodocs UI: http://localhost:${PORT}`);
-  console.log(`Repo root: ${REPO_ROOT}`);
+  console.log(`Notes root: ${REPO_ROOT} (docs: ${DOCS_ROOT})`);
+  console.log(`Config: ${CONFIG.configPath}`);
 });
