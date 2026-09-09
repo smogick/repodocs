@@ -2,6 +2,7 @@
   "name": "repodocs",
   "version": "0.0.1",
   "private": true,
+  "license": "MIT",
   "description": "Local web UI for a markdown knowledge base (repodocs)",
   "type": "commonjs",
   "scripts": {

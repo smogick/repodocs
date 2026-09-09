@@ -51,3 +51,7 @@ UI поднимается на `http://localhost:4173`.
 
 - `npm start` — запустить сервер.
 - `npm run build-index` — пересобрать `INDEX.md` без запуска UI.
+
+## Лицензия
+
+MIT, см. [LICENSE](LICENSE).
