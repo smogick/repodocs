@@ -1,6 +1,6 @@
 {
-  "name": "repodocs-ui",
-  "version": "1.0.0",
+  "name": "repodocs",
+  "version": "0.0.1",
   "private": true,
   "description": "Local web UI for a markdown knowledge base (repodocs)",
   "type": "commonjs",
