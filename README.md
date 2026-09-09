@@ -47,10 +47,28 @@ UI поднимается на `http://localhost:4173`.
 
 Карточка — это `README.md` с YAML frontmatter (`title`, `type`, `status`, `stack`, `tags`, `summary`, `updated`, …) либо одиночный `.md` с тем же frontmatter прямо в корневой папке. UI редактирует только файлы внутри `<docsDir>` и `INDEX.md`.
 
+## Новая база с нуля
+
+```bash
+npm run init
+```
+
+Разворачивает в `root` содержимое [scaffold/](scaffold/): `CLAUDE.md` с инструкциями для ИИ-агентов, `README.md`, `.gitignore`, схему frontmatter и чек-лист (`schema/`), шаблоны карточек (`templates/`), папки разделов, и собирает пустой `INDEX.md`. Существующие файлы не трогает (перезаписать: `npm run init -- --force`), так что можно запускать повторно на живой базе, чтобы подтянуть новые файлы scaffold.
+
+## Подключение к Claude Code
+
+```bash
+npm run claude-global
+```
+
+Добавляет в `~/.claude/CLAUDE.md` секцию между маркерами `<!-- repodocs:begin -->` / `<!-- repodocs:end -->`: список неархивных проектов и областей из базы, путь к `INDEX.md`, глоссарию и `CLAUDE.md` базы, и правило, когда агенту стоит туда заглядывать, а когда нет. Повторный запуск заменяет секцию на месте, остальное содержимое файла не меняется. `-- --dry-run` печатает секцию без записи, `-- --file PATH` пишет в другой файл.
+
 ## Скрипты
 
 - `npm start` — запустить сервер.
+- `npm run init` — развернуть scaffold в папку заметок.
 - `npm run build-index` — пересобрать `INDEX.md` без запуска UI.
+- `npm run claude-global` — обновить секцию в `~/.claude/CLAUDE.md`.
 
 ## Лицензия
 
