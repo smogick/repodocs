@@ -19,6 +19,7 @@
       <div class="row1">
         <h1>repodocs</h1>
         <div class="header-actions">
+          <button id="new-card-btn" class="icon-btn" title="Новая карточка"></button>
           <button id="trash-toggle" class="icon-btn" title="Корзина"></button>
           <button id="theme-toggle" class="icon-btn" title="Переключить тему"></button>
         </div>
@@ -56,6 +57,32 @@
     </div>
   </div>
 </div>
+<dialog id="new-card-dialog">
+  <form id="new-card-form" method="dialog">
+    <h2>Новая карточка</h2>
+    <label>Раздел
+      <select name="root">
+        <option value="projects">Проекты</option>
+        <option value="areas">Области</option>
+        <option value="resources">Ресурсы</option>
+      </select>
+    </label>
+    <label>Название
+      <input name="title" type="text" required autocomplete="off" placeholder="Например: Guardium" />
+    </label>
+    <label>Slug (имя папки)
+      <input name="slug" type="text" required autocomplete="off" pattern="[a-z0-9][a-z0-9._\-]*" placeholder="guardium" />
+    </label>
+    <label>Summary
+      <input name="summary" type="text" autocomplete="off" placeholder="Одна строка о сути" />
+    </label>
+    <p class="dialog-hint">README.md создаётся из шаблона в <code>templates/</code>; статус, стек и теги правятся потом через панель метаданных.</p>
+    <div class="dialog-actions">
+      <button type="button" id="new-card-cancel">Отмена</button>
+      <button type="submit" class="primary">Создать</button>
+    </div>
+  </form>
+</dialog>
 <script src="vendor/icons.js"></script>
 <script src="vendor/marked.umd.js"></script>
 <script src="vendor/purify.min.js"></script>

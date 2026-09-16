@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const express = require('express');
 const matter = require('gray-matter');
-const { CONFIG, REPO_ROOT, DOCS_ROOT, scanAll, resolveSafePath, resolveSafeDirPath } = require('./lib/scan');
+const { CONFIG, REPO_ROOT, DOCS_DIR, DOCS_ROOT, ROOTS, scanAll, findEntityByPath, resolveSafePath, resolveSafeDirPath } = require('./lib/scan');
 const trash = require('./lib/trash');
 
 const app = express();
@@ -95,6 +95,60 @@ app.post('/api/dir/create', (req, res) => {
     if (fs.existsSync(full)) return res.status(409).json({ error: 'папка с таким путём уже существует' });
     fs.mkdirSync(full, { recursive: true });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: String(err.message || err) });
+  }
+});
+
+// Creates a new card: <docs>/<root>/<slug>/README.md from the matching
+// template in <docs>/templates/ (project.md, area.md, resource.md) with its
+// placeholders filled in, or from a minimal built-in frontmatter when the
+// template is missing. Only the frontmatter lines are substituted, so the
+// template body (section headings, hints) reaches the new card untouched.
+const TEMPLATE_BY_ROOT = { projects: 'project', areas: 'area', resources: 'resource' };
+
+function newCardContent(rootName, { title, summary }) {
+  const type = TEMPLATE_BY_ROOT[rootName];
+  const today = new Date().toISOString().slice(0, 10);
+  const tplPath = path.join(DOCS_ROOT, 'templates', `${type}.md`);
+  if (!fs.existsSync(tplPath)) {
+    return `---\ntitle: ${title}\ntype: ${type}\nstatus: ${type === 'project' ? 'idea' : 'active'}\nstack: []\nowner: ""\ncreated: ${today}\nupdated: ${today}\ntags: []\nlinks:\n  repo: ""\n  tracker: ""\n  docs: ""\nsummary: ${summary}\n---\n\n## Что это\n\n`;
+  }
+  const raw = fs.readFileSync(tplPath, 'utf8');
+  const m = raw.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!m) return raw;
+  const fm = m[1]
+    .split('\n')
+    .map((line) => {
+      if (/^title:/.test(line)) return `title: ${title}`;
+      if (/^summary:/.test(line)) return `summary: ${summary}`;
+      if (/^(created|updated):/.test(line)) return line.replace(/<YYYY-MM-DD>|\S+$/, today);
+      return line;
+    })
+    .join('\n');
+  return `---\n${fm}\n---\n` + raw.slice(m[0].length);
+}
+
+app.post('/api/entity/create', (req, res) => {
+  try {
+    const { root, slug, title, summary } = req.body || {};
+    if (!TEMPLATE_BY_ROOT[root]) return res.status(400).json({ error: 'root must be projects, areas or resources' });
+    const cleanSlug = String(slug || '').trim();
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(cleanSlug)) {
+      return res.status(400).json({ error: 'slug: только латиница в нижнем регистре, цифры, "-", "_", "."' });
+    }
+    const cleanTitle = String(title || '').trim();
+    if (!cleanTitle) return res.status(400).json({ error: 'title required' });
+    if (findEntityByPath(`${root}/${cleanSlug}`)) {
+      return res.status(409).json({ error: 'карточка с таким slug уже есть в этом разделе' });
+    }
+    const dir = resolveSafeDirPath(`${DOCS_DIR}/${root}/${cleanSlug}`);
+    if (fs.existsSync(dir)) return res.status(409).json({ error: 'папка с таким именем уже существует' });
+    fs.mkdirSync(dir, { recursive: true });
+    const content = newCardContent(root, { title: cleanTitle, summary: String(summary || '').trim() });
+    fs.writeFileSync(path.join(dir, 'README.md'), content, 'utf8');
+    runReindex();
+    res.json({ ok: true, path: `${root}/${cleanSlug}` });
   } catch (err) {
     res.status(400).json({ error: String(err.message || err) });
   }

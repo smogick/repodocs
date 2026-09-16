@@ -39,6 +39,10 @@
     saveStatus: document.getElementById('save-status'),
     themeToggle: document.getElementById('theme-toggle'),
     trashToggle: document.getElementById('trash-toggle'),
+    newCardBtn: document.getElementById('new-card-btn'),
+    newCardDialog: document.getElementById('new-card-dialog'),
+    newCardForm: document.getElementById('new-card-form'),
+    newCardCancel: document.getElementById('new-card-cancel'),
   };
 
   const ROOT_LABELS = { projects: 'Проекты', areas: 'Области', resources: 'Ресурсы', archive: 'Архив' };
@@ -1089,8 +1093,68 @@
   });
   els.deleteBtn.addEventListener('click', deleteCurrentCard);
   els.trashToggle.addEventListener('click', toggleTrashView);
+  els.newCardBtn.addEventListener('click', openNewCardDialog);
+  els.newCardCancel.addEventListener('click', () => els.newCardDialog.close());
+  els.newCardForm.addEventListener('submit', submitNewCard);
+  els.newCardForm.title.addEventListener('input', () => {
+    if (!els.newCardForm.dataset.slugTouched) els.newCardForm.slug.value = slugify(els.newCardForm.title.value);
+  });
+  els.newCardForm.slug.addEventListener('input', () => {
+    els.newCardForm.dataset.slugTouched = els.newCardForm.slug.value ? '1' : '';
+  });
   els.newFileBtn.addEventListener('click', createFilePrompt);
   els.newFolderBtn.addEventListener('click', createFolderPrompt);
+
+  // Folder names are latin (they end up in paths and links), titles usually
+  // aren't — so the slug is derived from the title as it's typed, until the
+  // user edits the slug field by hand.
+  const TRANSLIT = {
+    а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l',
+    м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh',
+    щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+  };
+  function slugify(title) {
+    return String(title)
+      .toLowerCase()
+      .split('')
+      .map((ch) => (ch in TRANSLIT ? TRANSLIT[ch] : ch))
+      .join('')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  function openNewCardDialog() {
+    const f = els.newCardForm;
+    f.reset();
+    f.dataset.slugTouched = '';
+    if (state.filterRoot && f.root.querySelector(`option[value="${state.filterRoot}"]`)) f.root.value = state.filterRoot;
+    els.newCardDialog.showModal();
+    f.title.focus();
+  }
+
+  async function submitNewCard(ev) {
+    ev.preventDefault();
+    const f = els.newCardForm;
+    const body = { root: f.root.value, title: f.title.value.trim(), slug: f.slug.value.trim(), summary: f.summary.value.trim() };
+    try {
+      const res = await fetch('/api/entity/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ошибка создания');
+      els.newCardDialog.close();
+      if (state.viewMode === 'trash') await toggleTrashView();
+      state.filterRoot = null;
+      state.filterStatus = null;
+      await loadCards();
+      const created = state.cards.find((x) => x.path === data.path);
+      if (created) await selectCard(created);
+    } catch (err) {
+      alert('Не удалось создать карточку: ' + (err.message || err));
+    }
+  }
 
   async function createFilePrompt() {
     const c = state.selected;
@@ -1315,6 +1379,7 @@
     els.trashToggle.innerHTML = window.icon('trash-2', 15);
     els.newFileBtn.innerHTML = window.icon('file-plus', 14);
     els.newFolderBtn.innerHTML = window.icon('folder-plus', 14);
+    els.newCardBtn.innerHTML = window.icon('plus', 15);
   }
 
   initStaticIcons();
