@@ -32,6 +32,7 @@
     rawPane: document.getElementById('raw-pane'),
     previewPane: document.getElementById('preview-pane'),
     contentPanes: document.getElementById('content-panes'),
+    wysiwygPane: document.getElementById('wysiwyg-pane'),
     paneModeSwitch: document.getElementById('pane-mode-switch'),
     saveBtn: document.getElementById('save-btn'),
     reindexBtn: document.getElementById('reindex-btn'),
@@ -826,6 +827,8 @@
       els.saveStatus.textContent = '';
       state.dirty = false;
       state.metaEditing = false;
+      wysiwygBody = null; // new file: force the next sync to push content
+      if (state.paneMode === 'wysiwyg') syncWysiwygFromTextarea();
       setupSyncScroll(ta, els.previewPane);
       updateUrlHash(fullPath);
       renderHeader();
@@ -1306,15 +1309,90 @@
     { mode: 'view', icon: 'eye', title: 'Просмотр — только превью' },
     { mode: 'editor', icon: 'columns-2', title: 'Редактор — превью и markdown рядом' },
     { mode: 'source', icon: 'code', title: 'Source — только markdown' },
+    { mode: 'wysiwyg', icon: 'pencil', title: 'Визуальный редактор — правка без markdown-разметки' },
   ];
 
   function applyPaneMode() {
-    els.contentPanes.classList.remove('mode-view', 'mode-source');
+    els.contentPanes.classList.remove('mode-view', 'mode-source', 'mode-wysiwyg');
     if (state.paneMode === 'view') els.contentPanes.classList.add('mode-view');
     if (state.paneMode === 'source') els.contentPanes.classList.add('mode-source');
+    if (state.paneMode === 'wysiwyg') els.contentPanes.classList.add('mode-wysiwyg');
     els.paneModeSwitch.querySelectorAll('button').forEach((b) => {
       b.classList.toggle('active', b.dataset.mode === state.paneMode);
     });
+    if (state.paneMode === 'wysiwyg') syncWysiwygFromTextarea();
+  }
+
+  // --- Visual (WYSIWYG) editor ---------------------------------------
+  // Toast UI Editor edits only the markdown *body*; the frontmatter block
+  // stays in the textarea untouched (the meta panel owns it). The textarea
+  // remains the single source of truth for saving: every edit in the
+  // visual editor is written back into it and goes through the same
+  // dirty/preview path as typing in source mode. Content is pushed into
+  // the editor only when it actually differs from what it already holds,
+  // because Toast UI re-serializes markdown (escaping, list markers) and
+  // a no-op round-trip must not show up as an unsaved change.
+  let wysiwyg = null;
+  let wysiwygLoaded = ''; // editor's own serialization of the last pushed body, to detect no-op change events
+  let wysiwygSyncing = false; // change events fired by our own setMarkdown() are not user edits
+  let wysiwygBody = null; // raw body last pushed, so re-entering the mode without edits is a no-op
+
+  function ensureWysiwyg() {
+    if (wysiwyg) return wysiwyg;
+    wysiwyg = new toastui.Editor({
+      el: els.wysiwygPane,
+      initialEditType: 'wysiwyg',
+      hideModeSwitch: true,
+      usageStatistics: false,
+      height: '100%',
+      language: 'ru',
+      theme: isDarkTheme() ? 'dark' : 'default',
+      previewStyle: 'tab',
+      toolbarItems: [
+        ['heading', 'bold', 'italic', 'strike'],
+        ['hr', 'quote'],
+        ['ul', 'ol', 'task'],
+        ['table', 'link', 'code', 'codeblock'],
+      ],
+    });
+    wysiwyg.on('change', () => {
+      const ta = document.getElementById('raw-editor');
+      if (!ta || wysiwygSyncing) return;
+      const md = wysiwyg.getMarkdown();
+      if (md === wysiwygLoaded) return;
+      const { lines } = splitFrontmatterBlock(ta.value);
+      // Toast UI drops the final newline; keep files POSIX-terminated so a
+      // visual edit doesn't also show up as a trailing-newline diff in git.
+      ta.value = joinFrontmatterBlock(lines, md.endsWith('\n') ? md : md + '\n');
+      wysiwygLoaded = md;
+      wysiwygBody = splitFrontmatterBlock(ta.value).body;
+      if (ta.oninput) ta.oninput();
+    });
+    return wysiwyg;
+  }
+
+  function syncWysiwygFromTextarea() {
+    const ta = document.getElementById('raw-editor');
+    if (!ta) return;
+    const { body } = splitFrontmatterBlock(ta.value);
+    const ed = ensureWysiwyg();
+    if (body === wysiwygBody) return;
+    wysiwygSyncing = true;
+    try {
+      ed.setMarkdown(body, false);
+    } finally {
+      wysiwygSyncing = false;
+    }
+    // Remember the editor's own rendering of this body, not the body
+    // itself: getMarkdown() normalizes markers/escapes, and the first real
+    // change event must be compared against that normalized form.
+    wysiwygLoaded = ed.getMarkdown();
+    wysiwygBody = body;
+  }
+
+  function syncWysiwygTheme() {
+    if (!wysiwyg) return;
+    els.wysiwygPane.classList.toggle('toastui-editor-dark', isDarkTheme());
   }
 
   function initPaneModeSwitch() {
@@ -1348,6 +1426,7 @@
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
         if (currentThemeMode() !== 'system') return; // explicit choice overrides system changes
+        syncWysiwygTheme();
         const ta = document.getElementById('raw-editor');
         if (ta) renderPreview(ta.value);
       });
@@ -1366,6 +1445,7 @@
         } catch (e) {}
       }
       applyThemeButton(next);
+      syncWysiwygTheme();
       const ta = document.getElementById('raw-editor');
       if (ta) renderPreview(ta.value); // re-render so any mermaid diagrams pick up the new theme
     });
