@@ -1,2 +1,0 @@
-Toast UI Editor 3.2.2 — MIT License, Copyright (c) NHN Cloud Corp.
-https://github.com/nhn/tui.editor

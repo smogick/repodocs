@@ -1324,62 +1324,111 @@
   }
 
   // --- Visual (WYSIWYG) editor ---------------------------------------
-  // Toast UI Editor edits only the markdown *body*; the frontmatter block
-  // stays in the textarea untouched (the meta panel owns it). The textarea
-  // remains the single source of truth for saving: every edit in the
-  // visual editor is written back into it and goes through the same
-  // dirty/preview path as typing in source mode. Content is pushed into
-  // the editor only when it actually differs from what it already holds,
-  // because Toast UI re-serializes markdown (escaping, list markers) and
-  // a no-op round-trip must not show up as an unsaved change.
+  // Milkdown Crepe (vendored bundle, see vendor-src/crepe.js) edits only
+  // the markdown *body*; the frontmatter block stays in the textarea
+  // untouched (the meta panel owns it). The textarea remains the single
+  // source of truth for saving: every edit in the visual editor is written
+  // back into it and goes through the same dirty/preview path as typing in
+  // source mode. Content is pushed into the editor only when it actually
+  // differs from what it already holds, because remark re-serializes
+  // markdown (list markers, table padding) and a no-op round-trip must not
+  // show up as an unsaved change.
   let wysiwyg = null;
+  let wysiwygReady = null; // promise of the created editor, so callers can await it
   let wysiwygLoaded = ''; // editor's own serialization of the last pushed body, to detect no-op change events
-  let wysiwygSyncing = false; // change events fired by our own setMarkdown() are not user edits
+  let wysiwygSyncing = false; // change events fired by our own replaceAll() are not user edits
   let wysiwygBody = null; // raw body last pushed, so re-entering the mode without edits is a no-op
 
-  function ensureWysiwyg() {
-    if (wysiwyg) return wysiwyg;
-    wysiwyg = new toastui.Editor({
-      el: els.wysiwygPane,
-      initialEditType: 'wysiwyg',
-      hideModeSwitch: true,
-      usageStatistics: false,
-      height: '100%',
-      language: 'ru',
-      theme: isDarkTheme() ? 'dark' : 'default',
-      previewStyle: 'tab',
-      toolbarItems: [
-        ['heading', 'bold', 'italic', 'strike'],
-        ['hr', 'quote'],
-        ['ul', 'ol', 'task'],
-        ['table', 'link', 'code', 'codeblock'],
-      ],
-    });
-    wysiwyg.on('change', () => {
-      const ta = document.getElementById('raw-editor');
-      if (!ta || wysiwygSyncing) return;
-      const md = wysiwyg.getMarkdown();
-      if (md === wysiwygLoaded) return;
-      const { lines } = splitFrontmatterBlock(ta.value);
-      // Toast UI drops the final newline; keep files POSIX-terminated so a
-      // visual edit doesn't also show up as a trailing-newline diff in git.
-      ta.value = joinFrontmatterBlock(lines, md.endsWith('\n') ? md : md + '\n');
-      wysiwygLoaded = md;
-      wysiwygBody = splitFrontmatterBlock(ta.value).body;
-      if (ta.oninput) ta.oninput();
-    });
-    return wysiwyg;
+  const CREPE_LABELS = {
+    textGroup: {
+      label: 'Текст',
+      text: { label: 'Текст' },
+      h1: { label: 'Заголовок 1' },
+      h2: { label: 'Заголовок 2' },
+      h3: { label: 'Заголовок 3' },
+      h4: { label: 'Заголовок 4' },
+      h5: { label: 'Заголовок 5' },
+      h6: { label: 'Заголовок 6' },
+      quote: { label: 'Цитата' },
+      divider: { label: 'Разделитель' },
+    },
+    listGroup: {
+      label: 'Списки',
+      bulletList: { label: 'Маркированный список' },
+      orderedList: { label: 'Нумерованный список' },
+      taskList: { label: 'Чек-лист' },
+    },
+    advancedGroup: {
+      label: 'Блоки',
+      image: { label: 'Изображение' },
+      codeBlock: { label: 'Код' },
+      table: { label: 'Таблица' },
+    },
+  };
+
+  // Two remark quirks that would otherwise leak into every saved file:
+  // an empty table cell is emitted as `<br />`, and the final newline is
+  // dropped. Files stay POSIX-terminated so a visual edit doesn't also
+  // show up as a trailing-newline diff in git.
+  function tidyCrepeMarkdown(md) {
+    const out = md.replace(/\|\s*<br \/>\s*(?=\|)/g, '| ');
+    return out.endsWith('\n') ? out : out + '\n';
   }
 
-  function syncWysiwygFromTextarea() {
-    const ta = document.getElementById('raw-editor');
-    if (!ta) return;
-    const { body } = splitFrontmatterBlock(ta.value);
-    const ed = ensureWysiwyg();
-    if (body === wysiwygBody) return;
+  function ensureWysiwyg() {
+    if (wysiwygReady) return wysiwygReady;
+    wysiwyg = new window.Crepe({
+      root: els.wysiwygPane,
+      defaultValue: '',
+      features: { [window.Crepe.Feature.Latex]: false },
+      featureConfigs: {
+        [window.Crepe.Feature.BlockEdit]: CREPE_LABELS,
+        [window.Crepe.Feature.Placeholder]: { text: 'Введите текст или / для меню блоков', mode: 'block' },
+        [window.Crepe.Feature.LinkTooltip]: {
+          editButton: 'Изменить',
+          removeButton: 'Убрать',
+          confirmButton: 'OK',
+          inputPlaceholder: 'Вставьте ссылку…',
+        },
+        [window.Crepe.Feature.CodeMirror]: { searchPlaceholder: 'Язык…', noResultText: 'Не найдено' },
+        [window.Crepe.Feature.ImageBlock]: {
+          inlineUploadPlaceholderText: 'Ссылка на изображение',
+          inlineConfirmButton: () => 'OK',
+          blockUploadPlaceholderText: 'Ссылка на изображение',
+          blockConfirmButton: () => 'OK',
+        },
+      },
+    });
+    wysiwyg.on((api) => {
+      api.markdownUpdated((ctx, md) => {
+        const ta = document.getElementById('raw-editor');
+        if (!ta || wysiwygSyncing) return;
+        if (md === wysiwygLoaded) return;
+        const { lines } = splitFrontmatterBlock(ta.value);
+        ta.value = joinFrontmatterBlock(lines, tidyCrepeMarkdown(md));
+        wysiwygLoaded = md;
+        wysiwygBody = splitFrontmatterBlock(ta.value).body;
+        if (ta.oninput) ta.oninput();
+      });
+    });
+    wysiwygReady = wysiwyg.create().then(() => {
+      syncWysiwygTheme();
+      return wysiwyg;
+    });
+    return wysiwygReady;
+  }
+
+  async function syncWysiwygFromTextarea() {
+    if (!document.getElementById('raw-editor')) return;
+    const ed = await ensureWysiwyg();
+    // The file may have changed while the editor was being created.
+    const current = document.getElementById('raw-editor');
+    if (!current) return;
+    const latest = splitFrontmatterBlock(current.value).body;
+    if (latest === wysiwygBody) return;
     wysiwygSyncing = true;
     try {
-      ed.setMarkdown(body, false);
+      ed.editor.action(window.milkdownReplaceAll(latest, true));
     } finally {
       wysiwygSyncing = false;
     }
@@ -1387,12 +1436,12 @@
     // itself: getMarkdown() normalizes markers/escapes, and the first real
     // change event must be compared against that normalized form.
     wysiwygLoaded = ed.getMarkdown();
-    wysiwygBody = body;
+    wysiwygBody = latest;
   }
 
   function syncWysiwygTheme() {
-    if (!wysiwyg) return;
-    els.wysiwygPane.classList.toggle('toastui-editor-dark', isDarkTheme());
+    const root = els.wysiwygPane.querySelector('.milkdown');
+    if (root) root.classList.toggle('crepe-dark', isDarkTheme());
   }
 
   function initPaneModeSwitch() {

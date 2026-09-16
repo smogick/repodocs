@@ -69,6 +69,7 @@ npm run claude-global
 - `npm run init` — развернуть scaffold в папку заметок.
 - `npm run build-index` — пересобрать `INDEX.md` без запуска UI.
 - `npm run claude-global` — обновить секцию в `~/.claude/CLAUDE.md`.
+- `npm run build:vendor` — пересобрать бандл визуального редактора (`public/vendor/crepe/`) из `vendor-src/crepe.js`; результат закоммичен, для обычного запуска не нужен.
 
 ## Лицензия
 
