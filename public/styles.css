@@ -499,6 +499,21 @@ button:disabled { opacity: 0.5; cursor: default; }
 #wysiwyg-pane .milkdown .ProseMirror h2,
 #wysiwyg-pane .milkdown .ProseMirror h3 { color: var(--accent); }
 #wysiwyg-pane .milkdown .ProseMirror a { color: var(--accent); }
+/* Crepe draws cell borders at 20% opacity, which is too faint against
+   the app surfaces; use solid borders, a distinct header row and light
+   zebra striping so wide tables stay readable. */
+#wysiwyg-pane .milkdown .milkdown-table-block th,
+#wysiwyg-pane .milkdown .milkdown-table-block td {
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, var(--border));
+  padding: 6px 12px;
+}
+#wysiwyg-pane .milkdown .milkdown-table-block th {
+  background: var(--panel-2);
+  font-weight: 600;
+}
+#wysiwyg-pane .milkdown .milkdown-table-block tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--panel-2) 45%, var(--panel));
+}
 
 #raw-pane, #preview-pane { overflow-y: auto; padding: 20px 24px; }
 
